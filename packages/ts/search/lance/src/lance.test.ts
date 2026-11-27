@@ -446,6 +446,244 @@ describe("LanceIndex", () => {
     expect((await index.state()).requested).toEqual({ scrub: "2026-11-14T12:00:01.000Z" });
   });
 
+  /** The tables of the live generation. */
+  async function tables(index: IndexStore): Promise<string[]> {
+    const db = await connect(join(uri, (await index.state()).generation));
+    const names = await db.tableNames([]);
+    db.close();
+    return names;
+  }
+
+  it("drops a failed scrub's copy, keeps indexing and optimizing, and tries again later", async () => {
+    let failing = true;
+    const tried: string[] = [];
+    const index = await open({
+      scrubEvery: 0,
+      grace: 0,
+      optimizeEvery: 0,
+      beforeScrubStep: (step, table) => {
+        tried.push(`${step} ${table}`);
+        // Part-way: after the copy of events holds every row.
+        if (failing && step === "index" && table === "events") {
+          throw new Error("Resources exhausted: injected\nCaused by: more");
+        }
+      },
+    });
+    await commit(index, [replace(1, ["zebrasecret leaked"]), replace(2, ["zebra keeper"])]);
+    await pass(index);
+    await commit(index, [], [{ archive: H(1), read_at: 5, scrub: true }]);
+    await pass(index);
+    const before = await tables(index);
+    const due = "2026-11-14T12:00:00.000Z";
+
+    // Thrown once the pass is done, so the job's run records it, whole.
+    await expect(index.maintain(new AbortController().signal)).rejects.toThrow(
+      "Resources exhausted: injected\nCaused by: more",
+    );
+    expect(tried).toEqual(["copy events", "index events"]);
+    // The copy is gone, and nothing was switched: the old text is still in the files.
+    expect(await tables(index)).toEqual(before);
+    expect(filesHolding(uri, "zebrasecret")).not.toEqual([]);
+    expect((await index.state()).scrub_failed).toEqual({
+      at: due,
+      error: "Resources exhausted: injected",
+      failures: 1,
+      retry_at: "2026-11-14T13:00:00.000Z",
+      due_since: due,
+    });
+
+    // Until then, each pass indexes and optimizes as usual, and tries no scrub.
+    clock += 60_000;
+    await commit(index, [replace(3, ["giraffe later"])]);
+    await pass(index);
+    const events = await (await connect(join(uri, await index.generation()))).openTable("events");
+    expect((await events.indexStats("text_idx"))?.numUnindexedRows).toBe(1);
+    await index.maintain(new AbortController().signal);
+    await events.checkoutLatest();
+    expect((await events.indexStats("text_idx"))?.numUnindexedRows).toBe(0);
+    expect(tried).toHaveLength(2);
+    expect(await names(index, "giraffe")).toEqual(["s3"]);
+
+    // At the retry time it fails again, waits twice as long, and the pass still optimizes.
+    clock = Date.parse("2026-11-14T13:00:00.000Z");
+    await commit(index, [replace(4, ["okapi later"])]);
+    await pass(index);
+    await expect(index.maintain(new AbortController().signal)).rejects.toThrow(/injected/);
+    expect(tried).toHaveLength(4);
+    await events.checkoutLatest();
+    expect((await events.indexStats("text_idx"))?.numUnindexedRows).toBe(0);
+    events.close();
+    expect((await index.state()).scrub_failed).toMatchObject({
+      failures: 2,
+      retry_at: "2026-11-14T15:00:00.000Z",
+    });
+    expect(await tables(index)).toEqual(before);
+
+    // A scrub asked for after the failure runs on the next pass, and clears it.
+    failing = false;
+    clock += 1_000;
+    await (index as IndexStore & { requestScrub(): Promise<void> }).requestScrub();
+    await index.maintain(new AbortController().signal);
+    const state = await index.state();
+    expect(state.scrub_failed).toBeUndefined();
+    expect(state.requested).toBeUndefined();
+    clock += 1;
+    await index.maintain(new AbortController().signal);
+    expect(filesHolding(uri, "zebrasecret")).toEqual([]);
+    expect(await names(index, "zebra")).toEqual(["s2"]);
+    expect(await names(index, "giraffe")).toEqual(["s3"]);
+  });
+
+  it("records a scrub that stopped part-way, and drops the copy it left", async () => {
+    let scrubs = 0;
+    const index = await open({
+      scrubEvery: 0,
+      grace: 0,
+      optimizeEvery: 0,
+      beforeScrubStep: (step) => {
+        if (step === "copy") scrubs++;
+      },
+    });
+    await commit(index, [replace(1, ["zebrasecret leaked"]), replace(2, ["zebra keeper"])]);
+    await pass(index);
+    await commit(index, [], [{ archive: H(1), read_at: 5, scrub: true }]);
+    await pass(index);
+    const before = await tables(index);
+    // A worker killed while it copied events (out of memory): `meta` says a scrub runs, and
+    // its copy is there, named nowhere.
+    const db = await connect(join(uri, await index.generation()));
+    const orphan = await db.createTable("events_k1lled0", [{ id: "x", text: "zebrasecret" }]);
+    orphan.close();
+    db.close();
+    // Its last beat 40 minutes ago: past SCRUB_STALE.
+    await tamper({
+      scrub_started_at: "2026-11-14T11:10:00.000Z",
+      scrub_beat_at: "2026-11-14T11:20:00.000Z",
+    });
+    expect(await tables(index)).toContain("events_k1lled0");
+
+    await expect(index.maintain(new AbortController().signal)).rejects.toThrow(/did not finish/);
+    // Recorded, and not tried again at once: it would only be killed again.
+    expect(scrubs).toBe(0);
+    expect(await tables(index)).toEqual(before);
+    expect((await index.state()).scrub_failed).toMatchObject({
+      error: expect.stringMatching(/scrub started at 2026-11-14T11:10:00.000Z did not finish/),
+      failures: 1,
+      retry_at: "2026-11-14T13:00:00.000Z",
+    });
+    await commit(index, [replace(3, ["giraffe later"])]);
+    await pass(index);
+    expect(await names(index, "giraffe")).toEqual(["s3"]);
+
+    clock = Date.parse("2026-11-14T13:00:00.000Z");
+    await index.maintain(new AbortController().signal);
+    expect(scrubs).toBeGreaterThan(0);
+    expect((await index.state()).scrub_failed).toBeUndefined();
+    clock += 1;
+    await index.maintain(new AbortController().signal);
+    expect(filesHolding(uri, "zebrasecret")).toEqual([]);
+  });
+
+  it("leaves another worker's running scrub, and its copy, alone until its beat stops", async () => {
+    let scrubs = 0;
+    const index = await open({
+      scrubEvery: 0,
+      grace: 0,
+      optimizeEvery: 0,
+      beforeScrubStep: (step) => {
+        if (step === "copy") scrubs++;
+      },
+    });
+    await commit(index, [replace(1, ["zebrasecret leaked"]), replace(2, ["zebra keeper"])]);
+    await pass(index);
+    await commit(index, [], [{ archive: H(1), read_at: 5, scrub: true }]);
+    await pass(index);
+    // A rolling deploy: the old worker is copying events, and beat a minute ago.
+    const db = await connect(join(uri, await index.generation()));
+    const running = await db.createTable("events_0therw0", [{ id: "x", text: "zebrasecret" }]);
+    running.close();
+    db.close();
+    await tamper({
+      scrub_started_at: "2026-11-14T11:55:00.000Z",
+      scrub_beat_at: "2026-11-14T11:59:00.000Z",
+    });
+
+    await index.maintain(new AbortController().signal);
+    expect(scrubs).toBe(0);
+    expect(await tables(index)).toContain("events_0therw0");
+    expect((await index.state()).scrub_failed).toBeUndefined();
+
+    // Its beat stops: it was killed, so its copy goes and the failure is recorded.
+    clock += 31 * 60_000;
+    await expect(index.maintain(new AbortController().signal)).rejects.toThrow(/did not finish/);
+    expect(await tables(index)).not.toContain("events_0therw0");
+    expect((await index.state()).scrub_failed).toMatchObject({ failures: 1 });
+  });
+
+  it("drops its copy and records no failure when stopped part-way", async () => {
+    const controller = new AbortController();
+    const index = await open({
+      scrubEvery: 0,
+      grace: 0,
+      beforeScrubStep: (step) => {
+        if (step === "copy") controller.abort();
+      },
+    });
+    await commit(index, [replace(1, ["zebrasecret leaked"]), replace(2, ["zebra keeper"])]);
+    await pass(index);
+    await commit(index, [], [{ archive: H(1), read_at: 5, scrub: true }]);
+    await pass(index);
+    const before = await tables(index);
+
+    await index.maintain(controller.signal);
+    expect(await tables(index)).toEqual(before);
+    expect((await index.state()).scrub_failed).toBeUndefined();
+    expect(filesHolding(uri, "zebrasecret")).not.toEqual([]);
+
+    // Not taken for a scrub that stopped part-way: the next pass scrubs.
+    const next = await open({ scrubEvery: 0, grace: 0 });
+    await next.maintain(new AbortController().signal);
+    clock += 1;
+    await next.maintain(new AbortController().signal);
+    expect(filesHolding(uri, "zebrasecret")).toEqual([]);
+    expect(await names(next, "zebra")).toEqual(["s2"]);
+  });
+
+  it("keeps a copy that meta already names when the switch to it then fails", async () => {
+    let failing = true;
+    const index = await open({
+      scrubEvery: 0,
+      grace: 0,
+      beforeScrubStep: (step, table) => {
+        // As if the write to `meta` landed and its reply timed out.
+        if (failing && step === "switched" && table === "events") {
+          throw new Error("timed out after the write");
+        }
+      },
+    });
+    await commit(index, [replace(1, ["zebrasecret leaked"]), replace(2, ["zebra keeper"])]);
+    await pass(index);
+    await commit(index, [], [{ archive: H(1), read_at: 5, scrub: true }]);
+    await pass(index);
+
+    await expect(index.maintain(new AbortController().signal)).rejects.toThrow(/timed out/);
+    // The live events table is the copy, and it is still there.
+    expect(await names(index, "zebra")).toEqual(["s2"]);
+    expect(await names(index, "kee*")).toEqual(["s2"]);
+    expect((await index.state()).scrub_failed).toMatchObject({
+      error: "timed out after the write",
+    });
+
+    failing = false;
+    clock = Date.parse("2026-11-14T13:00:00.000Z");
+    await index.maintain(new AbortController().signal);
+    clock += 1;
+    await index.maintain(new AbortController().signal);
+    expect((await index.state()).scrub_failed).toBeUndefined();
+    expect(filesHolding(uri, "zebrasecret")).toEqual([]);
+    expect(await names(index, "zebra")).toEqual(["s2"]);
+  });
+
   it("caps the records it scores, says so, and looks back from now for a recent page", async () => {
     const index = await open({ maxScoredRows: 3, maxRecentRows: 3 });
     const day = 86_400_000;
@@ -514,6 +752,46 @@ describe("LanceIndex", () => {
     expect((await events.indexStats("id_idx"))?.numUnindexedRows).toBe(0);
     expect(await events.indexStats("text_idx")).toBeUndefined();
     events.close();
+  });
+
+  it("indexes a scrub's copy in parts, and leaves no row unindexed", async () => {
+    const index = await open({ scrubEvery: 0, grace: 0, scrubPartRows: 2 });
+    // One commit each, so the copy reads them as several batches.
+    for (const n of [1, 2, 3, 4, 5]) {
+      await commit(index, [replace(n, [`zebra${n} one`, `zebra${n} two`])]);
+    }
+    await pass(index);
+    await commit(index, [], [{ archive: H(1), read_at: 5, scrub: true }]);
+    await pass(index);
+    const db = await connect(join(uri, await index.generation()));
+    const optimized: number[] = [];
+    const inner = index as unknown as { createTable: (...a: unknown[]) => Promise<unknown> };
+    const createTable = inner.createTable.bind(index);
+    inner.createTable = async (...args) => {
+      const table = (await createTable(...args)) as { optimize: (o: unknown) => Promise<unknown> };
+      const optimize = table.optimize.bind(table);
+      table.optimize = async (o) => {
+        optimized.push(await (table as unknown as { countRows(): Promise<number> }).countRows());
+        return optimize(o);
+      };
+      return table;
+    };
+    await index.maintain(new AbortController().signal);
+    // events: indexed over its first part, then extended part by part.
+    expect(optimized.length).toBeGreaterThan(1);
+    const copy = (await db.tableNames([])).find((n) => n.startsWith("events_")) as string;
+    const events = await db.openTable(copy);
+    expect(await events.countRows()).toBe(8);
+    for (const { name } of await events.listIndices()) {
+      expect({ name, unindexed: (await events.indexStats(name))?.numUnindexedRows }).toEqual({
+        name,
+        unindexed: 0,
+      });
+    }
+    events.close();
+    db.close();
+    for (const n of [2, 3, 4, 5]) expect(await names(index, `zebra${n}`)).toEqual([`s${n}`]);
+    expect(await names(index, "zebra1")).toEqual([]);
   });
 
   it("scrubs removed text out of its files, and keeps answering", async () => {

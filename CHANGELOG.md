@@ -1,3 +1,11 @@
+## [0.30.2](https://github.com/dosu-ai/seshi/compare/v0.30.1...v0.30.2) (2026-11-27)
+
+
+### Bug Fixes
+
+* **search:** a LanceDB scrub completes at 10M records and fails safely ([#88](https://github.com/dosu-ai/seshi/issues/88)) ([c45db79](https://github.com/dosu-ai/seshi/commit/c45db79bdaf5c4bdc1fa3a9c5663c9c73cf55819))
+* **search:** re-measure the LanceDB stack at 10M on GCS, and warn past 10M records ([#87](https://github.com/dosu-ai/seshi/issues/87)) ([df16249](https://github.com/dosu-ai/seshi/commit/df16249b1b6d45f1687493234b6fa60d9768e3cb))
+
 ## [0.30.1](https://github.com/dosu-ai/seshi/compare/v0.30.0...v0.30.1) (2026-11-26)
 
 

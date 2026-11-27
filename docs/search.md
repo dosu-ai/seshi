@@ -178,20 +178,32 @@ scrub = "24h"
   commit. Its text leaves the index's files when the worker next scrubs: at most once every
   `search.lance.scrub` (a day), plus 15 minutes for readers still on the old files (F10.12).
   That is weaker than SQLite, which removes it from its file at once. `seshi search --scrub`
-  asks the worker to scrub on its next pass.
+  asks the worker to scrub on its next pass. A scrub that fails, or stops part-way (the worker
+  killed out of memory, say), drops the copy it was making and is tried again an hour later,
+  then two, four and so on, at most a day apart; meanwhile the worker indexes and optimizes as
+  usual. The failure is in the worker's log and the search-index job's last error. Until a
+  scrub finishes, `seshi search --status` and `seshi doctor --config` say that deleted text is
+  still in the index's files, and the job's backlog counts the failures (`scrub_failures`).
+  `seshi search --scrub` after a failure tries again on the next pass. A graceful shutdown
+  part-way is not a failure.
 - **Upkeep.** After a pass that committed something, at most every `search.lance.optimize` (an
   hour), the worker compacts the tables and adds new rows to their indexes. That rewrites the
-  indexes, so it takes longer as the index grows: about 1 minute at 1M records and 8 to 9 at
-  10M. The design fits up to roughly 10 to 30M records (about a year of a 50-person team);
-  `seshi doctor --config` warns past 20M
+  indexes, so it takes longer as the index grows: about 2 minutes at 1M records and 17 at 10M.
+  The scrub rewrites the tables the same way: about 7 minutes at 10M records, with up to 15 GB
+  of memory (most of it building the full-text indexes), so size the worker's host for it. The
+  design fits up to about 10M records (about four months of a 50-person team);
+  `seshi doctor --config` warns past 10M
   ([design](seshi/lancedb-search.md#risks)).
 - **Counts.** A relevance search scores at most `search.lance.max_scored_rows` records (10,000);
   past it the total is a lower bound (`capped`, "at least N"). Results are the best-scored ones
   either way.
-- **Prefixes** (`word*`) need at least 2 letters with LanceDB; SQLite takes one.
+- **Prefixes** (`word*`) need at least 2 letters with LanceDB; SQLite takes one. They are slow
+  on a large index: about 1 s at 1M records and 6 s at 10M, longer beside other words or
+  sorted by recent.
 
 `seshi search --status --config <seshi.toml>` shows the backend, the location (never its
-keys), the live generation, when it was ready and last caught up, and a rebuild in progress;
-`seshi workers status` and `GET /v1/admin/jobs` show the job's `building` flag.
-`seshi doctor --config <seshi.toml>` checks that the index can be read, that the worker's keys
-can write its location, that it caught up recently, and its size.
+keys), the live generation, when it was ready and last caught up, a rebuild in progress, and
+a scrub that failed; `seshi workers status` and `GET /v1/admin/jobs` show the job's `building`
+flag and `scrub_failures`. `seshi doctor --config <seshi.toml>` checks that the index can be
+read, that the worker's keys can write its location, that it caught up recently, that the last
+scrub did not fail, and its size.

@@ -1,0 +1,594 @@
+Copying gs://seshi-lance-remeasure-1125-54e757/harness/setup.sh to file:///spike/setup.sh
+  
+
+++ command -v /usr/bin/time
+++ export PATH=/root/.bun/bin:/root/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+++ PATH=/root/.bun/bin:/root/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+++ '[' '!' -x /spike/seshi-server ']'
+++ cd /spike/repo
+++ bun --version
+1.4.2
+++ uname -a
+Linux seshi-lance-remeasure 6.1.0-56-cloud-amd64 #1 SMP PREEMPT_DYNAMIC Debian 6.1.192-2 (2026-11-16) x86_64 GNU/Linux
+++ nproc
+8
+++ free -g
+++ head -2
+               total        used        free      shared  buff/cache   available
+Mem:              31           0          28           0           2          30
+++ df -h /
+++ tail -1
+/dev/sda1        99G  3.5G   91G   4% /
+++ ls -la /spike/seshi-server
+-rwxr-xr-x 1 root root 273008096 Nov 25 18:53 /spike/seshi-server
+++ /spike/seshi-server --version
+seshi 0.28.0
+++ du -sh 'node_modules/@lancedb/*/' packages/ts/search/lance/node_modules/@lancedb/lancedb/
+1.7M	packages/ts/search/lance/node_modules/@lancedb/lancedb/
+++ SH=docs/seshi/search-spike/shipped
++ U=gs://seshi-lance-remeasure-1125-54e757/b10m
++ T bun docs/seshi/search-spike/shipped/build.ts gs://seshi-lance-remeasure-1125-54e757/b10m 10000000
++ /usr/bin/time -v bun docs/seshi/search-spike/shipped/build.ts gs://seshi-lance-remeasure-1125-54e757/b10m 10000000
++ grep -vE '^\s+(Average|Exit|Socket|Signals|Swaps|Page size|File system|Voluntary|Involuntary|Minor|Major|Percent|System time|User time|Command being)'
+generation gmwwjfqqhecc67365, batchRecords 50000, target 10000000 records
+commit 1 u0 sessions 573 records 50097 took 6961ms total 49524 at 8s (6360/s) rss 1.0GB
+  optimize 7676ms rss 1.3GB
+commit 2 u0 sessions 611 records 50000 took 15579ms total 98913 at 24s (4128/s) rss 1.3GB
+commit 3 u0 sessions 607 records 50198 took 7729ms total 148504 at 32s (4605/s) rss 1.4GB
+  optimize 7734ms rss 1.4GB
+commit 4 u0 sessions 576 records 50004 took 15806ms total 197932 at 49s (4060/s) rss 1.4GB
+commit 5 u0 sessions 22 records 2304 took 2097ms total 200214 at 51s (3934/s) rss 1.4GB
+commit 6 u1 sessions 574 records 51617 took 7489ms total 251257 at 59s (4252/s) rss 1.8GB
+  optimize 12000ms rss 1.4GB
+commit 7 u1 sessions 545 records 50756 took 19957ms total 301468 at 80s (3783/s) rss 1.4GB
+commit 8 u1 sessions 654 records 50167 took 8046ms total 350981 at 88s (3970/s) rss 1.8GB
+  optimize 13187ms rss 1.5GB
+commit 9 u1 sessions 576 records 49818 took 21408ms total 400223 at 110s (3623/s) rss 1.5GB
+commit 10 u2 sessions 557 records 50085 took 7670ms total 449751 at 119s (3780/s) rss 1.9GB
+  optimize 15423ms rss 1.7GB
+commit 11 u2 sessions 622 records 50032 took 23646ms total 499161 at 143s (3486/s) rss 1.7GB
+commit 12 u2 sessions 546 records 50326 took 8092ms total 548941 at 152s (3610/s) rss 2.0GB
+  optimize 17315ms rss 1.9GB
+commit 13 u2 sessions 557 records 50139 took 25573ms total 598523 at 178s (3356/s) rss 1.9GB
+commit 14 u2 sessions 35 records 1904 took 2516ms total 600392 at 181s (3319/s) rss 2.0GB
+commit 15 u3 sessions 580 records 50107 took 7643ms total 649919 at 189s (3435/s) rss 2.2GB
+  optimize 18691ms rss 1.9GB
+commit 16 u3 sessions 663 records 50107 took 27056ms total 699363 at 217s (3224/s) rss 1.9GB
+commit 17 u3 sessions 579 records 50455 took 8061ms total 749239 at 226s (3319/s) rss 2.2GB
+  optimize 19488ms rss 1.8GB
+commit 18 u3 sessions 565 records 50008 took 27233ms total 798682 at 254s (3148/s) rss 1.8GB
+commit 19 u3 sessions 20 records 1776 took 2341ms total 800438 at 256s (3126/s) rss 1.8GB
+commit 20 u4 sessions 538 records 50192 took 7530ms total 850092 at 264s (3215/s) rss 2.3GB
+  optimize 21016ms rss 2.0GB
+commit 21 u4 sessions 601 records 50000 took 28552ms total 899491 at 294s (3061/s) rss 2.0GB
+commit 22 u4 sessions 509 records 50020 took 7870ms total 949002 at 302s (3140/s) rss 2.4GB
+  optimize 22860ms rss 2.2GB
+commit 23 u4 sessions 512 records 50066 took 31124ms total 998556 at 334s (2990/s) rss 2.2GB
+commit 24 u4 sessions 27 records 2292 took 2495ms total 1000821 at 337s (2974/s) rss 2.2GB
+commit 25 u5 sessions 616 records 50006 took 7629ms total 1050211 at 345s (3045/s) rss 2.5GB
+  optimize 26787ms rss 2.5GB
+commit 26 u5 sessions 546 records 50266 took 35018ms total 1099931 at 381s (2889/s) rss 2.5GB
+commit 27 u5 sessions 598 records 50422 took 8394ms total 1149755 at 390s (2949/s) rss 2.8GB
+  optimize 25598ms rss 2.3GB
+commit 28 u5 sessions 543 records 50137 took 33532ms total 1199349 at 424s (2828/s) rss 2.3GB
+commit 29 u5 sessions 23 records 1525 took 2451ms total 1200851 at 427s (2815/s) rss 2.3GB
+commit 30 u6 sessions 531 records 50697 took 7573ms total 1251017 at 435s (2877/s) rss 2.8GB
+  optimize 10921ms rss 2.3GB
+commit 31 u6 sessions 548 records 50814 took 19150ms total 1301283 at 455s (2862/s) rss 2.3GB
+commit 32 u6 sessions 618 records 50064 took 8574ms total 1350729 at 464s (2911/s) rss 2.8GB
+  optimize 11269ms rss 2.5GB
+commit 33 u6 sessions 578 records 50002 took 19665ms total 1400153 at 485s (2888/s) rss 2.5GB
+commit 34 u6 sessions 7 records 1002 took 2154ms total 1401148 at 487s (2878/s) rss 2.5GB
+commit 35 u7 sessions 610 records 50038 took 7607ms total 1450576 at 495s (2929/s) rss 2.8GB
+  optimize 16725ms rss 2.3GB
+commit 36 u7 sessions 556 records 50049 took 24558ms total 1500069 at 521s (2882/s) rss 2.3GB
+commit 37 u7 sessions 598 records 50045 took 7965ms total 1549516 at 530s (2926/s) rss 2.8GB
+  optimize 19782ms rss 2.3GB
+commit 38 u7 sessions 552 records 50085 took 27726ms total 1599049 at 558s (2865/s) rss 2.3GB
+commit 39 u7 sessions 24 records 2197 took 3058ms total 1601222 at 561s (2853/s) rss 2.3GB
+commit 40 u8 sessions 565 records 50047 took 7503ms total 1650704 at 569s (2899/s) rss 2.8GB
+  optimize 20599ms rss 2.3GB
+commit 41 u8 sessions 633 records 50201 took 28164ms total 1700272 at 598s (2842/s) rss 2.3GB
+commit 42 u8 sessions 618 records 50003 took 8991ms total 1749657 at 608s (2878/s) rss 2.4GB
+  optimize 20584ms rss 2.4GB
+commit 43 u8 sessions 600 records 50006 took 31629ms total 1799063 at 640s (2810/s) rss 2.4GB
+commit 44 u8 sessions 33 records 2198 took 2814ms total 1801228 at 643s (2801/s) rss 2.4GB
+commit 45 u9 sessions 523 records 50068 took 8029ms total 1850773 at 652s (2839/s) rss 2.8GB
+  optimize 28096ms rss 2.3GB
+commit 46 u9 sessions 589 records 50018 took 35854ms total 1900202 at 688s (2760/s) rss 2.3GB
+commit 47 u9 sessions 529 records 50014 took 8521ms total 1949687 at 698s (2794/s) rss 2.8GB
+  optimize 24884ms rss 2.4GB
+commit 48 u9 sessions 600 records 50261 took 36709ms total 1999348 at 735s (2719/s) rss 2.4GB
+commit 49 u9 sessions 24 records 1912 took 2751ms total 2001236 at 738s (2712/s) rss 2.4GB
+commit 50 u10 sessions 594 records 50077 took 8170ms total 2050719 at 747s (2746/s) rss 2.8GB
+  optimize 30256ms rss 2.6GB
+commit 51 u10 sessions 641 records 50045 took 38447ms total 2100123 at 786s (2672/s) rss 2.6GB
+commit 52 u10 sessions 612 records 50046 took 8237ms total 2149557 at 795s (2704/s) rss 2.9GB
+  optimize 32210ms rss 2.4GB
+commit 53 u10 sessions 638 records 50601 took 40089ms total 2199520 at 836s (2631/s) rss 2.4GB
+commit 54 u10 sessions 43 records 1805 took 2575ms total 2201282 at 839s (2625/s) rss 2.5GB
+commit 55 u11 sessions 561 records 50051 took 8155ms total 2250772 at 848s (2656/s) rss 2.9GB
+  optimize 33945ms rss 2.5GB
+commit 56 u11 sessions 637 records 50023 took 42640ms total 2300158 at 891s (2582/s) rss 2.5GB
+commit 57 u11 sessions 506 records 50232 took 8636ms total 2349884 at 900s (2611/s) rss 2.9GB
+  optimize 29688ms rss 2.4GB
+commit 58 u11 sessions 556 records 50003 took 40586ms total 2399331 at 941s (2549/s) rss 2.4GB
+commit 59 u11 sessions 34 records 2025 took 2977ms total 2401322 at 944s (2543/s) rss 2.5GB
+commit 60 u12 sessions 596 records 50005 took 7808ms total 2450731 at 953s (2571/s) rss 2.9GB
+  optimize 14655ms rss 2.5GB
+commit 61 u12 sessions 585 records 50015 took 23156ms total 2500161 at 977s (2558/s) rss 2.5GB
+commit 62 u12 sessions 589 records 50222 took 9445ms total 2549794 at 988s (2582/s) rss 2.5GB
+  optimize 14346ms rss 2.4GB
+commit 63 u12 sessions 665 records 50436 took 26833ms total 2599565 at 1015s (2561/s) rss 2.4GB
+commit 64 u12 sessions 24 records 1786 took 2469ms total 2601327 at 1018s (2556/s) rss 2.5GB
+commit 65 u13 sessions 555 records 50185 took 7649ms total 2650957 at 1026s (2584/s) rss 2.9GB
+  optimize 20958ms rss 2.6GB
+commit 66 u13 sessions 638 records 50135 took 29611ms total 2700454 at 1056s (2556/s) rss 2.6GB
+commit 67 u13 sessions 530 records 50001 took 8431ms total 2749925 at 1066s (2581/s) rss 2.9GB
+  optimize 24467ms rss 2.6GB
+commit 68 u13 sessions 571 records 50092 took 32965ms total 2799446 at 1099s (2547/s) rss 2.6GB
+commit 69 u13 sessions 36 records 2047 took 3553ms total 2801457 at 1103s (2541/s) rss 2.7GB
+commit 70 u14 sessions 629 records 50130 took 8245ms total 2850958 at 1112s (2565/s) rss 2.9GB
+  optimize 22894ms rss 2.6GB
+commit 71 u14 sessions 543 records 50074 took 32947ms total 2900489 at 1145s (2533/s) rss 2.6GB
+commit 72 u14 sessions 609 records 50046 took 9289ms total 2949926 at 1155s (2554/s) rss 2.9GB
+  optimize 30172ms rss 2.6GB
+commit 73 u14 sessions 543 records 50050 took 41915ms total 2999433 at 1198s (2504/s) rss 2.6GB
+commit 74 u14 sessions 21 records 2356 took 3033ms total 3001768 at 1201s (2499/s) rss 2.8GB
+commit 75 u15 sessions 500 records 50040 took 8858ms total 3051308 at 1211s (2520/s) rss 2.9GB
+  optimize 30579ms rss 2.6GB
+commit 76 u15 sessions 609 records 50000 took 39319ms total 3100699 at 1251s (2479/s) rss 2.6GB
+commit 77 u15 sessions 542 records 50004 took 8386ms total 3150161 at 1260s (2500/s) rss 3.0GB
+  optimize 32525ms rss 2.7GB
+commit 78 u15 sessions 582 records 50011 took 40839ms total 3199590 at 1302s (2458/s) rss 2.7GB
+commit 79 u15 sessions 27 records 2334 took 2807ms total 3201897 at 1305s (2454/s) rss 2.7GB
+commit 80 u16 sessions 480 records 50005 took 7781ms total 3251422 at 1314s (2475/s) rss 3.0GB
+  optimize 32426ms rss 2.5GB
+commit 81 u16 sessions 534 records 50007 took 40092ms total 3300895 at 1355s (2437/s) rss 2.5GB
+commit 82 u16 sessions 657 records 50137 took 9381ms total 3350375 at 1365s (2455/s) rss 3.0GB
+  optimize 33111ms rss 2.8GB
+commit 83 u16 sessions 566 records 51152 took 45366ms total 3400961 at 1411s (2410/s) rss 2.8GB
+commit 84 u16 sessions 15 records 1125 took 2462ms total 3402071 at 1413s (2407/s) rss 2.8GB
+commit 85 u17 sessions 593 records 50321 took 7812ms total 3451799 at 1422s (2427/s) rss 3.1GB
+  optimize 35618ms rss 2.8GB
+commit 86 u17 sessions 533 records 50056 took 45818ms total 3501322 at 1469s (2384/s) rss 2.8GB
+commit 87 u17 sessions 584 records 50100 took 8582ms total 3550838 at 1478s (2402/s) rss 3.2GB
+  optimize 32631ms rss 3.3GB
+commit 88 u17 sessions 607 records 50090 took 41155ms total 3600321 at 1520s (2368/s) rss 3.3GB
+commit 89 u17 sessions 20 records 3500 took 2974ms total 3603801 at 1523s (2366/s) rss 2.9GB
+commit 90 u18 sessions 537 records 50023 took 7795ms total 3653287 at 1532s (2384/s) rss 3.2GB
+  optimize 18545ms rss 2.9GB
+commit 91 u18 sessions 534 records 50027 took 27173ms total 3702780 at 1560s (2373/s) rss 2.9GB
+commit 92 u18 sessions 619 records 50113 took 8507ms total 3752274 at 1570s (2390/s) rss 3.0GB
+  optimize 14157ms rss 2.8GB
+commit 93 u18 sessions 569 records 50000 took 22562ms total 3801705 at 1594s (2385/s) rss 2.8GB
+commit 94 u18 sessions 34 records 2137 took 2637ms total 3803808 at 1597s (2383/s) rss 2.9GB
+commit 95 u19 sessions 416 records 50007 took 7828ms total 3853399 at 1605s (2400/s) rss 3.2GB
+  optimize 25730ms rss 2.9GB
+commit 96 u19 sessions 647 records 50114 took 34130ms total 3902866 at 1640s (2379/s) rss 2.9GB
+commit 97 u19 sessions 557 records 50059 took 8535ms total 3952368 at 1650s (2395/s) rss 3.2GB
+  optimize 23784ms rss 2.9GB
+commit 98 u19 sessions 547 records 50692 took 32508ms total 4002513 at 1684s (2377/s) rss 2.9GB
+commit 99 u19 sessions 7 records 1392 took 2512ms total 4003898 at 1686s (2374/s) rss 2.9GB
+commit 100 u20 sessions 563 records 50019 took 7871ms total 4053354 at 1695s (2391/s) rss 3.2GB
+  optimize 24435ms rss 3.0GB
+commit 101 u20 sessions 601 records 50038 took 32770ms total 4102791 at 1729s (2373/s) rss 3.0GB
+commit 102 u20 sessions 681 records 50015 took 8601ms total 4152125 at 1738s (2389/s) rss 3.3GB
+  optimize 32087ms rss 3.0GB
+commit 103 u20 sessions 599 records 50021 took 40653ms total 4201547 at 1780s (2361/s) rss 3.0GB
+commit 104 u20 sessions 42 records 2405 took 2827ms total 4203910 at 1783s (2358/s) rss 3.0GB
+commit 105 u21 sessions 542 records 50876 took 7950ms total 4254244 at 1792s (2374/s) rss 3.3GB
+  optimize 32110ms rss 3.0GB
+commit 106 u21 sessions 628 records 50737 took 40885ms total 4304353 at 1834s (2347/s) rss 3.0GB
+commit 107 u21 sessions 504 records 50005 took 8484ms total 4353854 at 1843s (2363/s) rss 3.3GB
+  optimize 32514ms rss 3.0GB
+commit 108 u21 sessions 502 records 50485 took 41166ms total 4403837 at 1885s (2336/s) rss 3.0GB
+commit 109 u21 sessions 1 records 124 took 2074ms total 4403960 at 1887s (2334/s) rss 3.0GB
+commit 110 u22 sessions 559 records 50004 took 7734ms total 4453405 at 1896s (2349/s) rss 3.3GB
+  optimize 34859ms rss 3.2GB
+commit 111 u22 sessions 546 records 50135 took 43055ms total 4502994 at 1940s (2321/s) rss 3.2GB
+commit 112 u22 sessions 494 records 50060 took 8347ms total 4552560 at 1949s (2336/s) rss 3.4GB
+  optimize 38451ms rss 3.1GB
+commit 113 u22 sessions 635 records 50041 took 46841ms total 4601966 at 1997s (2304/s) rss 3.1GB
+commit 114 u22 sessions 33 records 2266 took 4284ms total 4604199 at 2001s (2301/s) rss 3.1GB
+commit 115 u23 sessions 530 records 50110 took 7703ms total 4653779 at 2010s (2315/s) rss 3.4GB
+  optimize 32798ms rss 2.8GB
+commit 116 u23 sessions 572 records 50226 took 40775ms total 4703433 at 2052s (2293/s) rss 2.8GB
+commit 117 u23 sessions 586 records 50256 took 8433ms total 4753103 at 2061s (2306/s) rss 3.4GB
+  optimize 38008ms rss 3.0GB
+commit 118 u23 sessions 647 records 51080 took 46324ms total 4803536 at 2108s (2279/s) rss 3.0GB
+commit 119 u23 sessions 2 records 1155 took 2529ms total 4804689 at 2111s (2277/s) rss 3.1GB
+commit 120 u24 sessions 532 records 50018 took 7645ms total 4854175 at 2119s (2291/s) rss 3.3GB
+  optimize 13962ms rss 3.1GB
+commit 121 u24 sessions 568 records 50913 took 22595ms total 4904520 at 2143s (2289/s) rss 3.1GB
+commit 122 u24 sessions 557 records 50002 took 8354ms total 4953965 at 2152s (2302/s) rss 3.4GB
+  optimize 14396ms rss 3.1GB
+commit 123 u24 sessions 606 records 51299 took 22946ms total 5004658 at 2176s (2300/s) rss 3.1GB
+commit 124 u24 sessions 1 records 43 took 1980ms total 5004700 at 2178s (2298/s) rss 3.1GB
+commit 125 u25 sessions 569 records 50016 took 7703ms total 5054147 at 2187s (2311/s) rss 3.4GB
+  optimize 28041ms rss 3.1GB
+commit 126 u25 sessions 681 records 50097 took 36436ms total 5103563 at 2224s (2295/s) rss 3.1GB
+commit 127 u25 sessions 620 records 50125 took 8356ms total 5153068 at 2233s (2307/s) rss 3.4GB
+  optimize 26011ms rss 3.2GB
+commit 128 u25 sessions 639 records 50547 took 34491ms total 5202976 at 2269s (2293/s) rss 3.2GB
+commit 129 u25 sessions 27 records 1783 took 2646ms total 5204732 at 2271s (2292/s) rss 3.2GB
+commit 130 u26 sessions 581 records 50044 took 7794ms total 5254195 at 2280s (2304/s) rss 3.5GB
+  optimize 26397ms rss 2.9GB
+commit 131 u26 sessions 546 records 50257 took 34639ms total 5303906 at 2316s (2290/s) rss 2.9GB
+commit 132 u26 sessions 546 records 50033 took 8357ms total 5353393 at 2325s (2302/s) rss 3.4GB
+  optimize 28839ms rss 3.1GB
+commit 133 u26 sessions 588 records 51231 took 37514ms total 5404036 at 2364s (2286/s) rss 3.1GB
+commit 134 u26 sessions 13 records 759 took 2554ms total 5404782 at 2366s (2284/s) rss 3.1GB
+commit 135 u27 sessions 571 records 50060 took 7667ms total 5454271 at 2375s (2297/s) rss 3.4GB
+  optimize 30513ms rss 3.2GB
+commit 136 u27 sessions 564 records 50536 took 38943ms total 5504243 at 2415s (2279/s) rss 3.2GB
+commit 137 u27 sessions 472 records 50002 took 8379ms total 5553773 at 2424s (2291/s) rss 3.5GB
+  optimize 30915ms rss 3.3GB
+commit 138 u27 sessions 498 records 51970 took 39589ms total 5605245 at 2465s (2274/s) rss 3.3GB
+commit 139 u28 sessions 687 records 50035 took 8278ms total 5654593 at 2474s (2285/s) rss 3.6GB
+  optimize 32756ms rss 3.4GB
+commit 140 u28 sessions 637 records 50038 took 41429ms total 5703994 at 2517s (2266/s) rss 3.4GB
+commit 141 u28 sessions 556 records 50220 took 8401ms total 5753658 at 2526s (2278/s) rss 3.7GB
+  optimize 33431ms rss 3.2GB
+commit 142 u28 sessions 654 records 50661 took 41718ms total 5803665 at 2569s (2259/s) rss 3.2GB
+commit 143 u28 sessions 34 records 1630 took 2851ms total 5805261 at 2572s (2258/s) rss 3.3GB
+commit 144 u29 sessions 575 records 50015 took 7853ms total 5854701 at 2580s (2269/s) rss 3.7GB
+  optimize 35212ms rss 3.3GB
+commit 145 u29 sessions 662 records 50021 took 43847ms total 5904060 at 2625s (2249/s) rss 3.3GB
+commit 146 u29 sessions 626 records 50004 took 8707ms total 5953438 at 2635s (2260/s) rss 3.7GB
+  optimize 37636ms rss 3.2GB
+commit 147 u29 sessions 656 records 50655 took 45806ms total 6003437 at 2682s (2239/s) rss 3.2GB
+commit 148 u29 sessions 22 records 1955 took 2948ms total 6005370 at 2685s (2237/s) rss 3.3GB
+commit 149 u30 sessions 608 records 50475 took 8206ms total 6055237 at 2694s (2248/s) rss 3.7GB
+  optimize 15797ms rss 3.3GB
+commit 150 u30 sessions 649 records 50426 took 24434ms total 6105014 at 2719s (2245/s) rss 3.3GB
+commit 151 u30 sessions 584 records 50090 took 8803ms total 6154520 at 2729s (2256/s) rss 3.7GB
+  optimize 15818ms rss 3.4GB
+commit 152 u30 sessions 623 records 50004 took 24289ms total 6203901 at 2754s (2253/s) rss 3.4GB
+commit 153 u30 sessions 25 records 2185 took 2550ms total 6206061 at 2756s (2252/s) rss 3.5GB
+commit 154 u31 sessions 599 records 50546 took 8004ms total 6256008 at 2765s (2262/s) rss 3.8GB
+  optimize 26548ms rss 3.2GB
+commit 155 u31 sessions 583 records 50094 took 34690ms total 6305519 at 2801s (2251/s) rss 3.2GB
+commit 156 u31 sessions 614 records 50026 took 8633ms total 6354931 at 2810s (2261/s) rss 3.7GB
+  optimize 28232ms rss 3.2GB
+commit 157 u31 sessions 525 records 50133 took 36352ms total 6404539 at 2848s (2249/s) rss 3.2GB
+commit 158 u31 sessions 26 records 1556 took 2879ms total 6406069 at 2851s (2247/s) rss 3.2GB
+commit 159 u32 sessions 615 records 50170 took 7710ms total 6455624 at 2860s (2258/s) rss 3.7GB
+  optimize 29907ms rss 3.2GB
+commit 160 u32 sessions 600 records 50043 took 37786ms total 6505067 at 2898s (2245/s) rss 3.2GB
+commit 161 u32 sessions 666 records 50389 took 8704ms total 6554790 at 2908s (2254/s) rss 3.7GB
+  optimize 30543ms rss 3.2GB
+commit 162 u32 sessions 607 records 50010 took 38414ms total 6604193 at 2947s (2241/s) rss 3.2GB
+commit 163 u32 sessions 24 records 2094 took 2805ms total 6606263 at 2950s (2239/s) rss 3.4GB
+commit 164 u33 sessions 692 records 50020 took 7916ms total 6655591 at 2959s (2249/s) rss 3.7GB
+  optimize 32101ms rss 3.5GB
+commit 165 u33 sessions 598 records 50188 took 40551ms total 6705181 at 3000s (2235/s) rss 3.5GB
+commit 166 u33 sessions 567 records 50151 took 8698ms total 6754765 at 3010s (2244/s) rss 3.8GB
+  optimize 33924ms rss 3.4GB
+commit 167 u33 sessions 555 records 50021 took 41914ms total 6804231 at 3053s (2229/s) rss 3.4GB
+commit 168 u33 sessions 37 records 2265 took 2916ms total 6806459 at 3055s (2228/s) rss 3.5GB
+commit 169 u34 sessions 660 records 50031 took 7806ms total 6855830 at 3064s (2237/s) rss 3.4GB
+  optimize 36030ms rss 3.6GB
+commit 170 u34 sessions 537 records 50176 took 44140ms total 6905469 at 3109s (2221/s) rss 3.6GB
+commit 171 u34 sessions 555 records 50013 took 8666ms total 6954927 at 3119s (2230/s) rss 4.0GB
+  optimize 36663ms rss 3.7GB
+commit 172 u34 sessions 453 records 50095 took 45124ms total 7004569 at 3164s (2214/s) rss 3.7GB
+commit 173 u34 sessions 34 records 1947 took 3127ms total 7006482 at 3168s (2212/s) rss 3.7GB
+commit 174 u35 sessions 611 records 50076 took 7899ms total 7055947 at 3176s (2221/s) rss 4.0GB
+  optimize 37435ms rss 3.9GB
+commit 175 u35 sessions 600 records 50857 took 46094ms total 7106204 at 3223s (2205/s) rss 3.9GB
+commit 176 u35 sessions 583 records 50306 took 8627ms total 7155927 at 3233s (2214/s) rss 4.2GB
+  optimize 39286ms rss 4.0GB
+commit 177 u35 sessions 668 records 50055 took 47899ms total 7205314 at 3282s (2196/s) rss 4.0GB
+commit 178 u35 sessions 17 records 1351 took 2694ms total 7206648 at 3284s (2194/s) rss 4.0GB
+commit 179 u36 sessions 613 records 50633 took 8106ms total 7256668 at 3293s (2203/s) rss 4.3GB
+  optimize 17121ms rss 3.8GB
+commit 180 u36 sessions 624 records 50091 took 25182ms total 7306135 at 3319s (2201/s) rss 3.8GB
+commit 181 u36 sessions 652 records 51212 took 8521ms total 7356695 at 3329s (2210/s) rss 4.3GB
+  optimize 16832ms rss 4.0GB
+commit 182 u36 sessions 518 records 50200 took 25292ms total 7406377 at 3355s (2208/s) rss 4.0GB
+commit 183 u36 sessions 6 records 315 took 2264ms total 7406686 at 3357s (2206/s) rss 4.0GB
+commit 184 u37 sessions 530 records 50156 took 8135ms total 7456312 at 3366s (2215/s) rss 4.3GB
+  optimize 28272ms rss 4.0GB
+commit 185 u37 sessions 542 records 50253 took 36560ms total 7506023 at 3403s (2205/s) rss 4.0GB
+commit 186 u37 sessions 603 records 50086 took 8937ms total 7555506 at 3413s (2214/s) rss 4.3GB
+  optimize 29948ms rss 4.0GB
+commit 187 u37 sessions 612 records 50000 took 38704ms total 7604894 at 3453s (2202/s) rss 4.0GB
+commit 188 u37 sessions 30 records 2091 took 2763ms total 7606955 at 3456s (2201/s) rss 4.0GB
+commit 189 u38 sessions 619 records 50149 took 7828ms total 7656485 at 3464s (2210/s) rss 4.3GB
+  optimize 31077ms rss 3.7GB
+commit 190 u38 sessions 582 records 50128 took 39406ms total 7706031 at 3505s (2198/s) rss 3.7GB
+commit 191 u38 sessions 574 records 50117 took 8402ms total 7755574 at 3514s (2207/s) rss 4.3GB
+  optimize 32866ms rss 4.0GB
+commit 192 u38 sessions 582 records 50126 took 41328ms total 7805118 at 3557s (2195/s) rss 4.0GB
+commit 193 u38 sessions 31 records 1881 took 2796ms total 7806968 at 3559s (2193/s) rss 4.0GB
+commit 194 u39 sessions 600 records 50088 took 7960ms total 7856456 at 3568s (2202/s) rss 4.3GB
+  optimize 35469ms rss 4.1GB
+commit 195 u39 sessions 619 records 50027 took 43643ms total 7905864 at 3613s (2188/s) rss 4.1GB
+commit 196 u39 sessions 571 records 50006 took 8896ms total 7955299 at 3622s (2196/s) rss 4.4GB
+  optimize 38146ms rss 4.2GB
+commit 197 u39 sessions 550 records 50248 took 46950ms total 8004997 at 3670s (2181/s) rss 4.2GB
+commit 198 u39 sessions 23 records 2433 took 2883ms total 8007407 at 3673s (2180/s) rss 4.3GB
+commit 199 u40 sessions 612 records 50073 took 8386ms total 8056868 at 3683s (2188/s) rss 4.5GB
+  optimize 38820ms rss 4.2GB
+commit 200 u40 sessions 567 records 50663 took 47370ms total 8106964 at 3731s (2173/s) rss 4.2GB
+commit 201 u40 sessions 585 records 50025 took 8856ms total 8156404 at 3741s (2180/s) rss 4.5GB
+  optimize 39279ms rss 4.3GB
+commit 202 u40 sessions 555 records 50053 took 48203ms total 8205902 at 3790s (2165/s) rss 4.3GB
+commit 203 u40 sessions 16 records 1786 took 2774ms total 8207672 at 3793s (2164/s) rss 4.3GB
+commit 204 u41 sessions 572 records 50012 took 7787ms total 8257112 at 3801s (2172/s) rss 4.6GB
+  optimize 40946ms rss 4.3GB
+commit 205 u41 sessions 461 records 50182 took 49425ms total 8306833 at 3852s (2157/s) rss 4.3GB
+commit 206 u41 sessions 596 records 50183 took 8932ms total 8356420 at 3862s (2164/s) rss 4.5GB
+  optimize 41677ms rss 4.1GB
+commit 207 u41 sessions 595 records 50005 took 50160ms total 8405830 at 3913s (2148/s) rss 4.1GB
+commit 208 u41 sessions 31 records 2092 took 2694ms total 8407891 at 3916s (2147/s) rss 4.3GB
+commit 209 u42 sessions 613 records 50036 took 7769ms total 8457314 at 3924s (2155/s) rss 4.6GB
+  optimize 17687ms rss 4.3GB
+commit 210 u42 sessions 543 records 50040 took 26199ms total 8506811 at 3952s (2153/s) rss 4.3GB
+commit 211 u42 sessions 604 records 50160 took 8477ms total 8556367 at 3961s (2160/s) rss 4.6GB
+  optimize 18203ms rss 4.1GB
+commit 212 u42 sessions 538 records 50089 took 26570ms total 8605918 at 3988s (2158/s) rss 4.1GB
+commit 213 u42 sessions 30 records 2257 took 2634ms total 8608145 at 3991s (2157/s) rss 4.1GB
+commit 214 u43 sessions 543 records 50069 took 7727ms total 8657671 at 4000s (2165/s) rss 4.6GB
+  optimize 30060ms rss 4.3GB
+commit 215 u43 sessions 673 records 50001 took 38426ms total 8706999 at 4039s (2156/s) rss 4.3GB
+commit 216 u43 sessions 606 records 50021 took 8456ms total 8756414 at 4048s (2163/s) rss 4.6GB
+  optimize 32117ms rss 4.3GB
+commit 217 u43 sessions 522 records 50741 took 40952ms total 8806633 at 4090s (2153/s) rss 4.3GB
+commit 218 u43 sessions 17 records 1603 took 2778ms total 8808219 at 4093s (2152/s) rss 4.3GB
+commit 219 u44 sessions 550 records 50041 took 7785ms total 8857710 at 4102s (2159/s) rss 4.6GB
+  optimize 33063ms rss 4.3GB
+commit 220 u44 sessions 486 records 50751 took 41666ms total 8907975 at 4145s (2149/s) rss 4.3GB
+commit 221 u44 sessions 594 records 50004 took 8825ms total 8957385 at 4154s (2156/s) rss 4.6GB
+  optimize 35223ms rss 4.3GB
+commit 222 u44 sessions 633 records 51688 took 44030ms total 9008440 at 4200s (2145/s) rss 4.3GB
+commit 223 u45 sessions 634 records 50148 took 8275ms total 9057954 at 4209s (2152/s) rss 4.6GB
+  optimize 38854ms rss 4.3GB
+commit 224 u45 sessions 622 records 50584 took 47366ms total 9107916 at 4257s (2139/s) rss 4.3GB
+commit 225 u45 sessions 557 records 50180 took 8833ms total 9157539 at 4267s (2146/s) rss 4.6GB
+  optimize 40282ms rss 4.4GB
+commit 226 u45 sessions 515 records 50056 took 49216ms total 9207080 at 4317s (2133/s) rss 4.4GB
+commit 227 u45 sessions 20 records 1464 took 2689ms total 9208524 at 4320s (2132/s) rss 4.4GB
+commit 228 u46 sessions 568 records 50087 took 8091ms total 9258043 at 4329s (2139/s) rss 4.7GB
+  optimize 41442ms rss 4.3GB
+commit 229 u46 sessions 586 records 50010 took 50094ms total 9307467 at 4380s (2125/s) rss 4.3GB
+commit 230 u46 sessions 653 records 50470 took 9109ms total 9357284 at 4390s (2132/s) rss 4.6GB
+  optimize 43732ms rss 4.1GB
+commit 231 u46 sessions 609 records 50085 took 52259ms total 9406760 at 4443s (2117/s) rss 4.1GB
+commit 232 u46 sessions 18 records 1797 took 2994ms total 9408539 at 4446s (2116/s) rss 4.2GB
+commit 233 u47 sessions 564 records 50043 took 7925ms total 9458018 at 4456s (2123/s) rss 4.6GB
+  optimize 44771ms rss 4.3GB
+commit 234 u47 sessions 509 records 50337 took 53376ms total 9507846 at 4510s (2108/s) rss 4.3GB
+commit 235 u47 sessions 569 records 50076 took 8895ms total 9557353 at 4520s (2114/s) rss 4.6GB
+  optimize 45850ms rss 4.3GB
+commit 236 u47 sessions 603 records 50189 took 54613ms total 9606939 at 4576s (2100/s) rss 4.3GB
+commit 237 u47 sessions 21 records 1802 took 2656ms total 9608720 at 4578s (2099/s) rss 4.5GB
+commit 238 u48 sessions 589 records 50862 took 8109ms total 9658993 at 4587s (2106/s) rss 4.6GB
+  optimize 18693ms rss 4.3GB
+commit 239 u48 sessions 636 records 50002 took 27236ms total 9708359 at 4615s (2103/s) rss 4.3GB
+commit 240 u48 sessions 569 records 50707 took 8712ms total 9758497 at 4625s (2110/s) rss 4.7GB
+  optimize 19015ms rss 4.4GB
+commit 241 u48 sessions 629 records 50038 took 27659ms total 9807906 at 4654s (2108/s) rss 4.4GB
+commit 242 u48 sessions 16 records 890 took 2404ms total 9808780 at 4656s (2107/s) rss 4.4GB
+commit 243 u49 sessions 580 records 50234 took 8019ms total 9858434 at 4665s (2113/s) rss 4.7GB
+  optimize 34709ms rss 4.4GB
+commit 244 u49 sessions 599 records 50038 took 43335ms total 9907873 at 4709s (2104/s) rss 4.4GB
+commit 245 u49 sessions 612 records 50199 took 9143ms total 9957460 at 4720s (2110/s) rss 4.7GB
+commit 246 u49 sessions 492 records 43086 took 7669ms total 10000054 at 4728s (2115/s) rss 4.6GB
+  textIndexes 412545ms rss 9.8GB
+  textIndexes 0ms rss 9.8GB
+  textIndexes 0ms rss 9.8GB
+  textIndexes 0ms rss 9.8GB
+  textIndexes 0ms rss 9.8GB
+records 10000054, sessions 117446, commits 246
+commits (incl. build-time optimize) 4728s = 2115 records/s
+build-time optimize: 99 runs, 2743s total, last 34709ms
+commit time without optimize: 1807s
+passDone (full-text indexes) 413s; text indexes 412545ms, 0ms, 0ms, 0ms, 0ms
+total 5141s = 85.7 min, 1945 records/s
+state {"ready_at":"2026-11-25T21:09:01.795Z","caught_up_at":"2026-11-25T21:09:01.795Z","sessions":117446,"events":10000054,"generation":"gmwwjfqqhecc67365"}
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 1:25:46
+	Maximum resident set size (kbytes): 13185344
++ gcloud storage du -s gs://seshi-lance-remeasure-1125-54e757/b10m
+43549698886  gs://seshi-lance-remeasure-1125-54e757/b10m
++ bun docs/seshi/search-spike/shipped/search.ts gs://seshi-lance-remeasure-1125-54e757/b10m 3
+state {"ready_at":"2026-11-25T21:09:01.795Z","caught_up_at":"2026-11-25T21:09:01.795Z","sessions":117446,"events":10000054,"generation":"gmwwjfqqhecc67365"}
+sort | filter | query | open | first | warm p50 | warm p90 | min | total | capped
+relevance | admin | rare word [zeppelinx] | 275ms | 3247ms | 335ms | 454ms | 283ms | 97 sessions, 20 hits | 
+relevance | admin | one common word [error] | 169ms | 3416ms | 908ms | 949ms | 888ms | 8484 sessions, 20 hits | capped
+relevance | admin | two common words, AND [error test] | 250ms | 3114ms | 807ms | 848ms | 763ms | 8511 sessions, 20 hits | capped
+relevance | admin | phrase ["flaky checkout test"] | 179ms | 2832ms | 689ms | 1198ms | 668ms | 8475 sessions, 20 hits | capped
+relevance | admin | NOT [deploy -staging] | 169ms | 3785ms | 1302ms | 1336ms | 1261ms | 8492 sessions, 20 hits | capped
+relevance | admin | OR [rollback OR deployer] | 215ms | 3106ms | 745ms | 832ms | 727ms | 8440 sessions, 20 hits | capped
+relevance | admin | very common word [the] | 206ms | 2966ms | 926ms | 1031ms | 850ms | 8545 sessions, 20 hits | capped
+relevance | admin | prefix, common (deplo*) [deplo*] | 198ms | 10166ms | 6049ms | 6054ms | 5873ms | 8534 sessions, 20 hits | capped
+relevance | admin | prefix, 2 letters (de*) [de*] | 185ms | 8550ms | 5960ms | 5964ms | 5941ms | 8525 sessions, 20 hits | capped
+relevance | admin | prefix, mid-frequency (rollb*) [rollb*] | 191ms | 8225ms | 5830ms | 5841ms | 5809ms | 8431 sessions, 20 hits | capped
+relevance | admin | prefix, rare (zeppel*) [zeppel*] | 201ms | 1961ms | 346ms | 599ms | 343ms | 97 sessions, 20 hits | 
+relevance | admin | prefix, past 8 letters (deployment*) [deployment*] | 187ms | 7999ms | 6095ms | 7288ms | 6049ms | 8457 sessions, 20 hits | capped
+relevance | admin | word and prefix (error deplo*) [error deplo*] | 208ms | 12469ms | 10068ms | 10214ms | 10060ms | 8503 sessions, 20 hits | capped
+relevance | admin | phrase and prefix ("checkout test fail"*) ["checkout test fail"*] | 194ms | 8912ms | 6047ms | 6116ms | 6045ms | 8497 sessions, 20 hits | capped
+relevance | admin | NOT a prefix (error -deplo*) [error -deplo*] | 189ms | 8031ms | 6181ms | 6215ms | 6180ms | 6534 sessions, 20 hits | capped
+relevance | member | rare word [zeppelinx] | 203ms | 1990ms | 473ms | 476ms | 472ms | 83 sessions, 20 hits | 
+relevance | member | one common word [error] | 185ms | 2606ms | 1215ms | 1283ms | 1160ms | 8298 sessions, 20 hits | capped
+relevance | member | two common words, AND [error test] | 204ms | 2880ms | 1085ms | 1152ms | 1054ms | 8357 sessions, 20 hits | capped
+relevance | member | phrase ["flaky checkout test"] | 164ms | 2677ms | 916ms | 954ms | 857ms | 8230 sessions, 20 hits | capped
+relevance | member | NOT [deploy -staging] | 193ms | 3089ms | 1441ms | 1446ms | 1424ms | 8273 sessions, 20 hits | capped
+relevance | member | OR [rollback OR deployer] | 170ms | 2806ms | 932ms | 1199ms | 927ms | 8258 sessions, 20 hits | capped
+relevance | member | very common word [the] | 179ms | 2801ms | 1282ms | 1428ms | 1273ms | 8378 sessions, 20 hits | capped
+relevance | member | prefix, common (deplo*) [deplo*] | 179ms | 8253ms | 6280ms | 6298ms | 6226ms | 8365 sessions, 20 hits | capped
+relevance | member | prefix, 2 letters (de*) [de*] | 208ms | 8334ms | 6057ms | 6531ms | 5944ms | 8336 sessions, 20 hits | capped
+relevance | member | prefix, mid-frequency (rollb*) [rollb*] | 185ms | 7753ms | 5797ms | 5878ms | 5792ms | 8267 sessions, 20 hits | capped
+relevance | member | prefix, rare (zeppel*) [zeppel*] | 225ms | 1922ms | 505ms | 517ms | 493ms | 83 sessions, 20 hits | 
+relevance | member | prefix, past 8 letters (deployment*) [deployment*] | 189ms | 7846ms | 6083ms | 6112ms | 6052ms | 8265 sessions, 20 hits | capped
+relevance | member | word and prefix (error deplo*) [error deplo*] | 193ms | 11846ms | 9574ms | 9796ms | 9567ms | 8277 sessions, 20 hits | capped
+relevance | member | phrase and prefix ("checkout test fail"*) ["checkout test fail"*] | 218ms | 8773ms | 6353ms | 6402ms | 6243ms | 8256 sessions, 20 hits | capped
+relevance | member | NOT a prefix (error -deplo*) [error -deplo*] | 209ms | 8479ms | 6395ms | 6424ms | 6362ms | 6398 sessions, 20 hits | capped
+relevance | member+label+model | rare word [zeppelinx] | 173ms | 1658ms | 200ms | 201ms | 170ms | 5 sessions, 5 hits | 
+relevance | member+label+model | one common word [error] | 200ms | 2847ms | 1438ms | 1523ms | 1430ms | 4046 sessions, 20 hits | capped
+relevance | member+label+model | two common words, AND [error test] | 161ms | 2880ms | 1201ms | 1210ms | 1182ms | 4025 sessions, 20 hits | capped
+relevance | member+label+model | phrase ["flaky checkout test"] | 189ms | 2971ms | 916ms | 923ms | 915ms | 2233 sessions, 20 hits | 
+relevance | member+label+model | NOT [deploy -staging] | 182ms | 2821ms | 1245ms | 1293ms | 1237ms | 4012 sessions, 20 hits | capped
+relevance | member+label+model | OR [rollback OR deployer] | 206ms | 2641ms | 1084ms | 1889ms | 1052ms | 4033 sessions, 20 hits | capped
+relevance | member+label+model | very common word [the] | 214ms | 2969ms | 1634ms | 1688ms | 1577ms | 3993 sessions, 20 hits | capped
+relevance | member+label+model | prefix, common (deplo*) [deplo*] | 180ms | 5333ms | 3768ms | 3864ms | 3558ms | 3982 sessions, 20 hits | capped
+relevance | member+label+model | prefix, 2 letters (de*) [de*] | 171ms | 5526ms | 3660ms | 3797ms | 3659ms | 4020 sessions, 20 hits | capped
+relevance | member+label+model | prefix, mid-frequency (rollb*) [rollb*] | 203ms | 4306ms | 2404ms | 2434ms | 2397ms | 2049 sessions, 20 hits | 
+relevance | member+label+model | prefix, rare (zeppel*) [zeppel*] | 199ms | 1776ms | 197ms | 222ms | 196ms | 5 sessions, 5 hits | 
+relevance | member+label+model | prefix, past 8 letters (deployment*) [deployment*] | 185ms | 5258ms | 3615ms | 3651ms | 3565ms | 3968 sessions, 20 hits | capped
+relevance | member+label+model | word and prefix (error deplo*) [error deplo*] | 192ms | 6132ms | 4089ms | 5496ms | 3949ms | 3964 sessions, 20 hits | capped
+relevance | member+label+model | phrase and prefix ("checkout test fail"*) ["checkout test fail"*] | 187ms | 4751ms | 2522ms | 2546ms | 2504ms | 2233 sessions, 20 hits | 
+relevance | member+label+model | NOT a prefix (error -deplo*) [error -deplo*] | 191ms | 5678ms | 4031ms | 4112ms | 3982ms | 3287 sessions, 20 hits | capped
+recent | admin | rare word [zeppelinx] | 223ms | 1718ms | 293ms | 296ms | 282ms | 97 sessions, 20 hits | 
+recent | admin | one common word [error] | 194ms | 5137ms | 3583ms | 3781ms | 3380ms | 885 sessions, 20 hits | capped
+recent | admin | two common words, AND [error test] | 207ms | 4479ms | 2435ms | 3199ms | 2374ms | 880 sessions, 20 hits | capped
+recent | admin | phrase ["flaky checkout test"] | 199ms | 2237ms | 614ms | 651ms | 587ms | 29775 sessions, 20 hits | 
+recent | admin | NOT [deploy -staging] | 171ms | 5148ms | 2782ms | 2790ms | 2693ms | 849 sessions, 20 hits | capped
+recent | admin | OR [rollback OR deployer] | 199ms | 4104ms | 1447ms | 1457ms | 1439ms | 589 sessions, 20 hits | capped
+recent | admin | very common word [the] | 195ms | 5630ms | 3719ms | 3804ms | 3649ms | 886 sessions, 20 hits | capped
+recent | admin | prefix, common (deplo*) [deplo*] | 194ms | 14890ms | 11938ms | 12396ms | 11936ms | 868 sessions, 20 hits | capped
+recent | admin | prefix, 2 letters (de*) [de*] | 219ms | 14991ms | 12523ms | 12657ms | 12502ms | 885 sessions, 20 hits | capped
+recent | admin | prefix, mid-frequency (rollb*) [rollb*] | 187ms | 14791ms | 12773ms | 12936ms | 12671ms | 28091 sessions, 20 hits | 
+recent | admin | prefix, rare (zeppel*) [zeppel*] | 200ms | 1770ms | 377ms | 386ms | 309ms | 97 sessions, 20 hits | 
+recent | admin | prefix, past 8 letters (deployment*) [deployment*] | 187ms | 12912ms | 10812ms | 10814ms | 10784ms | 753 sessions, 20 hits | capped
+recent | admin | word and prefix (error deplo*) [error deplo*] | 204ms | 18739ms | 16401ms | 16448ms | 16355ms | 854 sessions, 20 hits | capped
+recent | admin | phrase and prefix ("checkout test fail"*) ["checkout test fail"*] | 223ms | 15103ms | 12958ms | 13111ms | 12922ms | 29775 sessions, 20 hits | 
+recent | admin | NOT a prefix (error -deplo*) [error -deplo*] | 206ms | 16579ms | 14499ms | 14744ms | 14295ms | 866 sessions, 20 hits | capped
+recent | member | rare word [zeppelinx] | 206ms | 1832ms | 506ms | 510ms | 473ms | 83 sessions, 20 hits | 
+recent | member | one common word [error] | 191ms | 4938ms | 3642ms | 5018ms | 3539ms | 747 sessions, 20 hits | capped
+recent | member | two common words, AND [error test] | 189ms | 4256ms | 2603ms | 2642ms | 2544ms | 744 sessions, 20 hits | capped
+recent | member | phrase ["flaky checkout test"] | 199ms | 2268ms | 783ms | 842ms | 777ms | 25392 sessions, 20 hits | 
+recent | member | NOT [deploy -staging] | 183ms | 4333ms | 2820ms | 2865ms | 2793ms | 718 sessions, 20 hits | capped
+recent | member | OR [rollback OR deployer] | 187ms | 3108ms | 1650ms | 1696ms | 1589ms | 500 sessions, 20 hits | capped
+recent | member | very common word [the] | 186ms | 5912ms | 3950ms | 4009ms | 3949ms | 749 sessions, 20 hits | capped
+recent | member | prefix, common (deplo*) [deplo*] | 188ms | 13241ms | 11423ms | 13248ms | 11411ms | 734 sessions, 20 hits | capped
+recent | member | prefix, 2 letters (de*) [de*] | 199ms | 14076ms | 12050ms | 12059ms | 11988ms | 746 sessions, 20 hits | capped
+recent | member | prefix, mid-frequency (rollb*) [rollb*] | 261ms | 13516ms | 12097ms | 12187ms | 12086ms | 23962 sessions, 20 hits | 
+recent | member | prefix, rare (zeppel*) [zeppel*] | 192ms | 1880ms | 519ms | 627ms | 508ms | 83 sessions, 20 hits | 
+recent | member | prefix, past 8 letters (deployment*) [deployment*] | 196ms | 12776ms | 10814ms | 10815ms | 10754ms | 641 sessions, 20 hits | capped
+recent | member | word and prefix (error deplo*) [error deplo*] | 235ms | 18592ms | 15766ms | 15777ms | 15592ms | 726 sessions, 20 hits | capped
+recent | member | phrase and prefix ("checkout test fail"*) ["checkout test fail"*] | 202ms | 14789ms | 12374ms | 12407ms | 12266ms | 25392 sessions, 20 hits | 
+recent | member | NOT a prefix (error -deplo*) [error -deplo*] | 194ms | 16679ms | 14841ms | 14917ms | 14718ms | 733 sessions, 20 hits | capped
+recent | member+label+model | rare word [zeppelinx] | 204ms | 1744ms | 190ms | 242ms | 186ms | 5 sessions, 5 hits | 
+recent | member+label+model | one common word [error] | 212ms | 4047ms | 2415ms | 2467ms | 2396ms | 54 sessions, 20 hits | capped
+recent | member+label+model | two common words, AND [error test] | 168ms | 3595ms | 1815ms | 1841ms | 1781ms | 54 sessions, 20 hits | capped
+recent | member+label+model | phrase ["flaky checkout test"] | 194ms | 2728ms | 973ms | 987ms | 930ms | 2233 sessions, 20 hits | 
+recent | member+label+model | NOT [deploy -staging] | 210ms | 3702ms | 1872ms | 1920ms | 1828ms | 52 sessions, 20 hits | capped
+recent | member+label+model | OR [rollback OR deployer] | 194ms | 3242ms | 975ms | 988ms | 969ms | 5958 sessions, 20 hits | 
+recent | member+label+model | very common word [the] | 192ms | 4564ms | 2656ms | 2675ms | 2635ms | 54 sessions, 20 hits | capped
+recent | member+label+model | prefix, common (deplo*) [deplo*] | 201ms | 8936ms | 7108ms | 7333ms | 7098ms | 54 sessions, 20 hits | capped
+recent | member+label+model | prefix, 2 letters (de*) [de*] | 216ms | 9090ms | 6931ms | 6978ms | 6855ms | 54 sessions, 20 hits | capped
+recent | member+label+model | prefix, mid-frequency (rollb*) [rollb*] | 205ms | 4533ms | 2485ms | 2605ms | 2408ms | 2049 sessions, 20 hits | 
+recent | member+label+model | prefix, rare (zeppel*) [zeppel*] | 185ms | 1529ms | 192ms | 197ms | 189ms | 5 sessions, 5 hits | 
+recent | member+label+model | prefix, past 8 letters (deployment*) [deployment*] | 369ms | 9374ms | 7393ms | 7415ms | 7372ms | 7741 sessions, 20 hits | 
+recent | member+label+model | word and prefix (error deplo*) [error deplo*] | 189ms | 10611ms | 8521ms | 8534ms | 8444ms | 54 sessions, 20 hits | capped
+recent | member+label+model | phrase and prefix ("checkout test fail"*) ["checkout test fail"*] | 182ms | 4860ms | 2582ms | 2640ms | 2566ms | 2233 sessions, 20 hits | 
+recent | member+label+model | NOT a prefix (error -deplo*) [error -deplo*] | 188ms | 10947ms | 9121ms | 9147ms | 9066ms | 52 sessions, 20 hits | capped
++ T bun docs/seshi/search-spike/shipped/steady.ts gs://seshi-lance-remeasure-1125-54e757/b10m commit 10
++ /usr/bin/time -v bun docs/seshi/search-spike/shipped/steady.ts gs://seshi-lance-remeasure-1125-54e757/b10m commit 10
++ grep -vE '^\s+(Average|Exit|Socket|Signals|Swaps|Page size|File system|Voluntary|Involuntary|Minor|Major|Percent|System time|User time|Command being)'
+generation gmwwjfqqhecc67365 {"ready_at":"2026-11-25T21:09:01.795Z","caught_up_at":"2026-11-25T21:09:01.795Z","sessions":117446,"events":10000054,"generation":"gmwwjfqqhecc67365"}
+page 0 u0: 49 sessions (35 held), 1796 records, refused 0, removed 1: 3400ms check 710ms, events 766ms, delete 405ms, scrub_due 0ms, sessions 272ms, changes 5ms, seen 733ms, cursor 510ms rss 0.4GB
+page 1 u1: 49 sessions (35 held), 1676 records, refused 0, removed 1: 2718ms check 589ms, events 606ms, delete 325ms, scrub_due 0ms, sessions 252ms, changes 0ms, seen 586ms, cursor 361ms rss 0.6GB
+page 2 u2: 49 sessions (35 held), 2185 records, refused 0, removed 1: 2707ms check 647ms, events 618ms, delete 326ms, scrub_due 0ms, sessions 270ms, changes 0ms, seen 497ms, cursor 350ms rss 0.7GB
+page 3 u3: 49 sessions (35 held), 1325 records, refused 0, removed 1: 2566ms check 584ms, events 585ms, delete 302ms, scrub_due 0ms, sessions 265ms, changes 0ms, seen 516ms, cursor 314ms rss 0.9GB
+page 4 u4: 49 sessions (35 held), 2064 records, refused 0, removed 1: 2673ms check 598ms, events 683ms, delete 325ms, scrub_due 0ms, sessions 248ms, changes 0ms, seen 483ms, cursor 336ms rss 0.9GB
+page 5 u5: 49 sessions (35 held), 2066 records, refused 0, removed 1: 2618ms check 588ms, events 573ms, delete 375ms, scrub_due 0ms, sessions 247ms, changes 0ms, seen 490ms, cursor 345ms rss 0.8GB
+page 6 u6: 49 sessions (35 held), 1835 records, refused 0, removed 1: 2684ms check 597ms, events 661ms, delete 361ms, scrub_due 0ms, sessions 247ms, changes 0ms, seen 492ms, cursor 327ms rss 0.9GB
+page 7 u7: 49 sessions (35 held), 1890 records, refused 0, removed 1: 2477ms check 477ms, events 614ms, delete 337ms, scrub_due 0ms, sessions 258ms, changes 0ms, seen 457ms, cursor 334ms rss 0.8GB
+page 8 u8: 49 sessions (35 held), 2668 records, refused 0, removed 1: 2752ms check 568ms, events 678ms, delete 318ms, scrub_due 0ms, sessions 380ms, changes 0ms, seen 488ms, cursor 320ms rss 0.9GB
+page 9 u9: 49 sessions (35 held), 4455 records, refused 0, removed 1: 3116ms check 714ms, events 906ms, delete 353ms, scrub_due 0ms, sessions 281ms, changes 0ms, seen 518ms, cursor 343ms rss 0.9GB
+commit p50 2707ms p90 3400ms max 3400ms
+  check: p50 597ms max 714ms
+  events: p50 661ms max 906ms
+  delete: p50 337ms max 405ms
+  scrub_due: p50 0ms max 0ms
+  sessions: p50 265ms max 380ms
+  changes: p50 0ms max 5ms
+  seen: p50 497ms max 733ms
+  cursor: p50 343ms max 510ms
+state {"ready_at":"2026-11-25T21:09:01.795Z","caught_up_at":"2026-11-25T21:09:01.795Z","sessions":117446,"events":10000054,"generation":"gmwwjfqqhecc67365"}
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:31.30
+	Maximum resident set size (kbytes): 1270900
++ bun docs/seshi/search-spike/shipped/search.ts gs://seshi-lance-remeasure-1125-54e757/b10m 2 --sort relevance
+state {"ready_at":"2026-11-25T21:09:01.795Z","caught_up_at":"2026-11-25T21:09:01.795Z","sessions":117446,"events":10000054,"generation":"gmwwjfqqhecc67365"}
+sort | filter | query | open | first | warm p50 | warm p90 | min | total | capped
+relevance | admin | rare word [zeppelinx] | 189ms | 1791ms | 431ms | 431ms | 410ms | 97 sessions, 20 hits | 
+relevance | admin | one common word [error] | 188ms | 3078ms | 1703ms | 1703ms | 1693ms | 8491 sessions, 20 hits | capped
+relevance | admin | two common words, AND [error test] | 182ms | 3266ms | 1544ms | 1544ms | 1532ms | 8514 sessions, 20 hits | capped
+relevance | admin | phrase ["flaky checkout test"] | 182ms | 2782ms | 1470ms | 1470ms | 1402ms | 8478 sessions, 20 hits | capped
+relevance | admin | NOT [deploy -staging] | 167ms | 5187ms | 4201ms | 4201ms | 4037ms | 8494 sessions, 20 hits | capped
+relevance | admin | OR [rollback OR deployer] | 176ms | 2227ms | 818ms | 818ms | 807ms | 8443 sessions, 20 hits | capped
+relevance | admin | very common word [the] | 173ms | 3293ms | 1780ms | 1780ms | 1744ms | 8550 sessions, 20 hits | capped
+relevance | admin | prefix, common (deplo*) [deplo*] | 190ms | 8714ms | 7049ms | 7049ms | 7039ms | 8530 sessions, 20 hits | capped
+relevance | admin | prefix, 2 letters (de*) [de*] | 211ms | 9225ms | 6982ms | 6982ms | 6961ms | 8525 sessions, 20 hits | capped
+relevance | admin | prefix, mid-frequency (rollb*) [rollb*] | 168ms | 8507ms | 7170ms | 7170ms | 7085ms | 8437 sessions, 20 hits | capped
+relevance | admin | prefix, rare (zeppel*) [zeppel*] | 188ms | 1628ms | 525ms | 525ms | 512ms | 97 sessions, 20 hits | 
+relevance | admin | prefix, past 8 letters (deployment*) [deployment*] | 194ms | 8678ms | 7166ms | 7166ms | 7029ms | 8457 sessions, 20 hits | capped
+relevance | admin | word and prefix (error deplo*) [error deplo*] | 197ms | 16732ms | 15134ms | 15134ms | 14569ms | 8502 sessions, 20 hits | capped
+relevance | admin | phrase and prefix ("checkout test fail"*) ["checkout test fail"*] | 189ms | 8004ms | 6002ms | 6002ms | 5907ms | 8500 sessions, 20 hits | capped
+relevance | admin | NOT a prefix (error -deplo*) [error -deplo*] | 182ms | 9273ms | 7297ms | 7297ms | 7207ms | 6545 sessions, 20 hits | capped
+relevance | member | rare word [zeppelinx] | 213ms | 1966ms | 531ms | 531ms | 528ms | 83 sessions, 20 hits | 
+relevance | member | one common word [error] | 184ms | 3417ms | 1970ms | 1970ms | 1957ms | 8305 sessions, 20 hits | capped
+relevance | member | two common words, AND [error test] | 192ms | 3472ms | 1823ms | 1823ms | 1759ms | 8357 sessions, 20 hits | capped
+relevance | member | phrase ["flaky checkout test"] | 197ms | 3176ms | 1608ms | 1608ms | 1558ms | 8232 sessions, 20 hits | capped
+relevance | member | NOT [deploy -staging] | 184ms | 5050ms | 3929ms | 3929ms | 3703ms | 8279 sessions, 20 hits | capped
+relevance | member | OR [rollback OR deployer] | 196ms | 2569ms | 1187ms | 1187ms | 1126ms | 8263 sessions, 20 hits | capped
+relevance | member | very common word [the] | 177ms | 3759ms | 2151ms | 2151ms | 2104ms | 8384 sessions, 20 hits | capped
+relevance | member | prefix, common (deplo*) [deplo*] | 192ms | 9603ms | 7479ms | 7479ms | 7408ms | 8364 sessions, 20 hits | capped
+relevance | member | prefix, 2 letters (de*) [de*] | 187ms | 9286ms | 7332ms | 7332ms | 7227ms | 8351 sessions, 20 hits | capped
+relevance | member | prefix, mid-frequency (rollb*) [rollb*] | 188ms | 8823ms | 7208ms | 7208ms | 7100ms | 8271 sessions, 20 hits | capped
+relevance | member | prefix, rare (zeppel*) [zeppel*] | 275ms | 2017ms | 638ms | 638ms | 584ms | 83 sessions, 20 hits | 
+relevance | member | prefix, past 8 letters (deployment*) [deployment*] | 176ms | 9256ms | 7367ms | 7367ms | 7315ms | 8271 sessions, 20 hits | capped
+relevance | member | word and prefix (error deplo*) [error deplo*] | 180ms | 15171ms | 13984ms | 13984ms | 13426ms | 8281 sessions, 20 hits | capped
+relevance | member | phrase and prefix ("checkout test fail"*) ["checkout test fail"*] | 191ms | 8093ms | 7025ms | 7025ms | 6610ms | 8262 sessions, 20 hits | capped
+relevance | member | NOT a prefix (error -deplo*) [error -deplo*] | 189ms | 10317ms | 7865ms | 7865ms | 7805ms | 6400 sessions, 20 hits | capped
+relevance | member+label+model | rare word [zeppelinx] | 193ms | 1709ms | 215ms | 215ms | 208ms | 5 sessions, 5 hits | 
+relevance | member+label+model | one common word [error] | 179ms | 3749ms | 2114ms | 2114ms | 2048ms | 4049 sessions, 20 hits | capped
+relevance | member+label+model | two common words, AND [error test] | 176ms | 3625ms | 1966ms | 1966ms | 1883ms | 4031 sessions, 20 hits | capped
+relevance | member+label+model | phrase ["flaky checkout test"] | 181ms | 2727ms | 1031ms | 1031ms | 1001ms | 2240 sessions, 20 hits | 
+relevance | member+label+model | NOT [deploy -staging] | 192ms | 2767ms | 1559ms | 1559ms | 1364ms | 4010 sessions, 20 hits | capped
+relevance | member+label+model | OR [rollback OR deployer] | 186ms | 2491ms | 1184ms | 1184ms | 1119ms | 4038 sessions, 20 hits | capped
+relevance | member+label+model | very common word [the] | 167ms | 3918ms | 2233ms | 2233ms | 2161ms | 3996 sessions, 20 hits | capped
+relevance | member+label+model | prefix, common (deplo*) [deplo*] | 183ms | 6830ms | 5049ms | 5049ms | 4999ms | 3985 sessions, 20 hits | capped
+relevance | member+label+model | prefix, 2 letters (de*) [de*] | 197ms | 7252ms | 5192ms | 5192ms | 5101ms | 4026 sessions, 20 hits | capped
+relevance | member+label+model | prefix, mid-frequency (rollb*) [rollb*] | 189ms | 4335ms | 2467ms | 2467ms | 2455ms | 2053 sessions, 20 hits | 
+relevance | member+label+model | prefix, rare (zeppel*) [zeppel*] | 190ms | 1949ms | 265ms | 265ms | 222ms | 5 sessions, 5 hits | 
+relevance | member+label+model | prefix, past 8 letters (deployment*) [deployment*] | 195ms | 6960ms | 5082ms | 5082ms | 5042ms | 3970 sessions, 20 hits | capped
+relevance | member+label+model | word and prefix (error deplo*) [error deplo*] | 217ms | 6224ms | 4456ms | 4456ms | 4438ms | 3973 sessions, 20 hits | capped
+relevance | member+label+model | phrase and prefix ("checkout test fail"*) ["checkout test fail"*] | 194ms | 4628ms | 2730ms | 2730ms | 2690ms | 2240 sessions, 20 hits | 
+relevance | member+label+model | NOT a prefix (error -deplo*) [error -deplo*] | 209ms | 7559ms | 5639ms | 5639ms | 5623ms | 3289 sessions, 20 hits | capped
++ T bun docs/seshi/search-spike/shipped/steady.ts gs://seshi-lance-remeasure-1125-54e757/b10m optimize
++ /usr/bin/time -v bun docs/seshi/search-spike/shipped/steady.ts gs://seshi-lance-remeasure-1125-54e757/b10m optimize
++ grep -vE '^\s+(Average|Exit|Socket|Signals|Swaps|Page size|File system|Voluntary|Involuntary|Minor|Major|Percent|System time|User time|Command being)'
+generation gmwwjfqqhecc67365 {"ready_at":"2026-11-25T21:09:01.795Z","caught_up_at":"2026-11-25T21:09:01.795Z","sessions":117446,"events":10000054,"generation":"gmwwjfqqhecc67365"}
+maintain (optimize every table) 1021.2s rss 12.2GB
+state {"ready_at":"2026-11-25T21:09:01.795Z","caught_up_at":"2026-11-25T21:09:01.795Z","sessions":117446,"events":10000054,"generation":"gmwwjfqqhecc67365"}
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 17:02.54
+	Maximum resident set size (kbytes): 13176680
++ T bun docs/seshi/search-spike/shipped/steady.ts gs://seshi-lance-remeasure-1125-54e757/b10m scrub
++ /usr/bin/time -v bun docs/seshi/search-spike/shipped/steady.ts gs://seshi-lance-remeasure-1125-54e757/b10m scrub
++ grep -vE '^\s+(Average|Exit|Socket|Signals|Swaps|Page size|File system|Voluntary|Involuntary|Minor|Major|Percent|System time|User time|Command being)'
+generation gmwwjfqqhecc67365 {"ready_at":"2026-11-25T21:09:01.795Z","caught_up_at":"2026-11-25T21:09:01.795Z","sessions":117446,"events":10000054,"generation":"gmwwjfqqhecc67365"}
+scrub page: 3238ms, removed 1
+error: lance error: LanceError(IO): Resources exhausted: Additional allocation failed for ExternalSorterMerge[0] with top memory consumers (across reservations) as:
+  ExternalSorter[0]#838(can spill: true) consumed 690.7 MB, peak 1159.3 MB,
+  ExternalSorterMerge[0]#839(can spill: false) consumed 509.1 MB, peak 700.9 MB.
+Error: Failed to allocate additional 330.8 KB for ExternalSorterMerge[0] with 0.0 B already allocated for this reservation - 161.5 KB remain available for the total memory pool: fair(pool_size: 1200.0 MB), /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/lance-datafusion-14.0.2/src/chunker.rs:49:46  Caused by: LanceError(IO): Resources exhausted: Additional allocation failed for ExternalSorterMerge[0] with top memory consumers (across reservations) as:
+    ExternalSorter[0]#838(can spill: true) consumed 690.7 MB, peak 1159.3 MB,
+    ExternalSorterMerge[0]#839(can spill: false) consumed 509.1 MB, peak 700.9 MB.
+  Error: Failed to allocate additional 330.8 KB for ExternalSorterMerge[0] with 0.0 B already allocated for this reservation - 161.5 KB remain available for the total memory pool: fair(pool_size: 1200.0 MB), /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/lance-datafusion-14.0.2/src/chunker.rs:49:46    Caused by: Resources exhausted: Additional allocation failed for ExternalSorterMerge[0] with top memory consumers (across reservations) as:
+      ExternalSorter[0]#838(can spill: true) consumed 690.7 MB, peak 1159.3 MB,
+      ExternalSorterMerge[0]#839(can spill: false) consumed 509.1 MB, peak 700.9 MB.
+    Error: Failed to allocate additional 330.8 KB for ExternalSorterMerge[0] with 0.0 B already allocated for this reservation - 161.5 KB remain available for the total memory pool: fair(pool_size: 1200.0 MB)
+ code: "GenericFailure"
+
+
+Bun v1.4.2 (Linux x64)
+Command exited with non-zero status 1
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 3:30.52
+	Maximum resident set size (kbytes): 7199272
++ gcloud storage du -s gs://seshi-lance-remeasure-1125-54e757/b10m
+48040042705  gs://seshi-lance-remeasure-1125-54e757/b10m
+exit 0
