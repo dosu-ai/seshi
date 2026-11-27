@@ -498,6 +498,7 @@ export class HttpSeshi implements Seshi {
         model: request.model,
         label: Object.entries(request.labels ?? {}).map(([key, value]) => `${key}=${value}`),
         source: request.source,
+        role: request.role && request.role.length > 0 ? request.role.join(",") : undefined,
         since: request.since,
         until: request.until,
         sort: request.sort,

@@ -171,6 +171,8 @@ export {
 } from "./schemas/trajectory";
 export { type SchemaFile, schemaProblems } from "./schemas/validate";
 export {
+  DEFAULT_SEARCH_MAX_CHARS,
+  MAX_SEARCH_CHARS,
   SEARCH_SORTS,
   type SearchIndexState,
   type SearchMatch,

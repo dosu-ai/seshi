@@ -24,6 +24,7 @@ import {
   excerpt,
   type FeedPosition,
   type FeedRow,
+  type IndexedLlmCall,
   type IndexedSession,
   type IndexOptions,
   type IndexState,
@@ -31,6 +32,7 @@ import {
   IndexUnavailable,
   indexText,
   type LanceSettings,
+  maxCharsOf,
   type PageCommit,
   type ScrubFailure,
   SearchQueryError,
@@ -64,12 +66,15 @@ import {
   sqlTime,
 } from "./query";
 
-/** The layout of the tables and `meta`: an index written under another is rebuilt beside it. */
-export const LANCE_SCHEMA = "seshi/search-lance/1";
+/** The layout of the tables and `meta`: an index written under another is rebuilt beside it. 2:
+ * events' `seq`, `tool_call_id`, `ok` and `chars`, sessions' `event_count`, `llm_calls`, and
+ * the role in an event's `id`. */
+export const LANCE_SCHEMA = "seshi/search-lance/2";
 
 /** The steps of `commit()`, in order: what a crash test fails before. */
 export const COMMIT_STEPS = [
   "events",
+  "llm_calls",
   "delete",
   "scrub_due",
   "sessions",
@@ -160,14 +165,26 @@ const strList = (name: string) =>
   new Field(name, new List(new Field("item", new Utf8(), true)), false);
 const ms = (name: string, nullable = false) =>
   new Field(name, new TimestampMillisecond(), nullable);
-const i64 = (name: string) => new Field(name, new Int64(), false);
+const i64 = (name: string, nullable = false) => new Field(name, new Int64(), nullable);
+const i32 = (name: string) => new Field(name, new Int32(), false);
 
-type Kind = "events" | "sessions" | "cursors" | "seen" | "changes";
+type Kind = "events" | "sessions" | "llm_calls" | "cursors" | "seen" | "changes";
 /** The tables holding session text and metadata, which a scrub always rewrites. */
-const TEXT_KINDS: ReadonlySet<Kind> = new Set(["events", "sessions"]);
-const KINDS: readonly Kind[] = ["events", "sessions", "cursors", "seen", "changes"];
+const TEXT_KINDS: ReadonlySet<Kind> = new Set(["events", "sessions", "llm_calls"]);
+const KINDS: readonly Kind[] = ["events", "sessions", "llm_calls", "cursors", "seen", "changes"];
+
+/** The counts of `llm_calls`, after its keys and labels: Int64, nullable. */
+const CALL_COUNTS = [
+  "duration_ms",
+  "input_tokens",
+  "output_tokens",
+  "cache_read_input_tokens",
+  "cache_creation_input_tokens",
+  "reasoning_tokens",
+  "total_tokens",
+] as const satisfies readonly (keyof IndexedLlmCall)[];
 /** A scrub's copy of a table: `<kind>_<suffix>`. */
-const COPY_NAME = /^(events|sessions|cursors|seen|changes)_[a-z0-9]+$/;
+const COPY_NAME = /^(events|sessions|llm_calls|cursors|seen|changes)_[a-z0-9]+$/;
 
 const SCHEMAS: Record<Kind | "meta", Schema> = {
   events: new Schema([
@@ -175,10 +192,14 @@ const SCHEMAS: Record<Kind | "meta", Schema> = {
     str("owner"),
     str("archive_id"),
     str("content_hash"),
-    new Field("event_index", new Int32(), false),
+    i32("event_index"),
+    i32("seq"),
     str("role"),
     str("tool_name", true),
+    str("tool_call_id", true),
+    new Field("ok", new Bool(), true),
     ms("ts", true),
+    i32("chars"),
     str("text"),
     str("text_prefix"),
     str("format"),
@@ -215,8 +236,23 @@ const SCHEMAS: Record<Kind | "meta", Schema> = {
     str("updated_at"),
     i64("updated_ms"),
     strList("traces"),
+    i32("event_count"),
     i64("read_at"),
     new Field("removed", new Bool(), false),
+  ]),
+  llm_calls: new Schema([
+    str("id"),
+    str("owner"),
+    str("archive_id"),
+    str("content_hash"),
+    str("call_id"),
+    str("model", true),
+    str("provider", true),
+    ms("started_at", true),
+    ms("ended_at", true),
+    ...CALL_COUNTS.map((c) => i64(c, true)),
+    str("stop_reason", true),
+    str("error", true),
   ]),
   cursors: new Schema([str("owner"), str("cursor")]),
   seen: new Schema([str("owner"), str("key"), i64("at")]),
@@ -270,6 +306,11 @@ const SCALAR_INDEXES: Record<Kind, [string, () => Index][]> = {
     ["labels", Index.labelList],
   ],
   sessions: [["id", Index.btree]],
+  llm_calls: [
+    ["id", Index.btree],
+    ["archive_id", Index.btree],
+    ["model", Index.bitmap],
+  ],
   cursors: [],
   seen: [["key", Index.btree]],
   changes: [["stamp", Index.btree]],
@@ -279,6 +320,8 @@ const SCALAR_INDEXES: Record<Kind, [string, () => Index][]> = {
 interface GenConfig {
   schema: string;
   events: string;
+  /** Each role's cap; absent before schema 2. */
+  max_chars?: string;
   scope?: string;
   feed?: boolean;
 }
@@ -287,6 +330,7 @@ function configOf(options: IndexOptions): GenConfig {
   return {
     schema: LANCE_SCHEMA,
     events: JSON.stringify([...options.events].sort()),
+    max_chars: JSON.stringify(maxCharsOf(options)),
     ...(options.scope !== undefined ? { scope: options.scope } : {}),
     ...(options.feed ? { feed: true } : {}),
   };
@@ -392,6 +436,7 @@ interface SessionRow {
   updated_at: string;
   updated_ms: bigint;
   traces: string[];
+  event_count: number;
   read_at: bigint;
   removed: boolean;
 }
@@ -433,6 +478,7 @@ function heldOf(raw: Record<string, unknown>): HeldSession {
     ...(ended !== undefined ? { ended_at: ended } : {}),
     updated_at: String(raw.updated_at),
     traces,
+    event_count: num(raw.event_count ?? 0),
   } as IndexedSession;
   const row = {
     ...(raw as unknown as SessionRow),
@@ -441,6 +487,7 @@ function heldOf(raw: Record<string, unknown>): HeldSession {
     labels: labels ?? null,
     started_at: started === undefined ? null : new Date(started),
     ended_at: ended === undefined ? null : new Date(ended),
+    event_count: num(raw.event_count ?? 0),
     read_at: BigInt(num(raw.read_at)),
     updated_ms: BigInt(num(raw.updated_ms)),
   };
@@ -470,6 +517,7 @@ function sessionRow(s: IndexedSession, readAt: number): SessionRow {
     updated_at: s.updated_at,
     updated_ms: BigInt(Date.parse(s.updated_at) || 0),
     traces: [...s.traces],
+    event_count: s.event_count,
     read_at: BigInt(readAt),
     removed: false,
   };
@@ -974,7 +1022,7 @@ export class LanceIndex implements IndexStore {
         : (await this.table(meta, gen, "events"))
             .query()
             .where(`id IN (${sqlList(picked)})`)
-            .select(["id", "content_hash", "event_index", "role", "tool_name", "ts", "text"])
+            .select(["id", "content_hash", "event_index", "seq", "role", "tool_name", "ts", "text"])
             .limit(picked.length)
             .toArray(),
     ]);
@@ -996,6 +1044,7 @@ export class LanceIndex implements IndexStore {
         matches.push({
           content_hash: String(r.content_hash),
           event_index: Number(r.event_index),
+          seq: Number(r.seq),
           role: String(r.role) as EventRole,
           ...(r.tool_name !== null && r.tool_name !== undefined
             ? { tool_name: String(r.tool_name) }
@@ -1156,20 +1205,46 @@ export class LanceIndex implements IndexStore {
       const text = indexText(event.text);
       if (text.trim() === "") continue;
       rows.push({
-        id: `${session.owner}/${session.archive_id}/${event.content_hash}/${event.event_index}`,
+        // With the role: what the assistant said alongside tool calls takes its first call's
+        // index, so the index alone would make it and that call one row.
+        id: `${session.owner}/${session.archive_id}/${event.content_hash}/${event.event_index}/${event.role}`,
         owner: session.owner,
         archive_id: session.archive_id,
         content_hash: event.content_hash,
         event_index: event.event_index,
+        seq: event.seq,
         role: event.role,
         tool_name: event.tool_name ?? null,
+        tool_call_id: event.tool_call_id ?? null,
+        ok: event.ok ?? null,
         ts: event.timestamp === undefined ? null : new Date(event.timestamp),
+        chars: event.chars,
         text,
         text_prefix: prefixesOf(text),
         ...fields,
       });
     }
     return rows;
+  }
+
+  private callRows(update: SessionUpdate): Record<string, unknown>[] {
+    const { owner, archive_id } = update.session;
+    return (update.llm_calls ?? []).map((call) => ({
+      id: `${owner}/${archive_id}/${call.content_hash}/${call.call_id}`,
+      owner,
+      archive_id,
+      content_hash: call.content_hash,
+      call_id: call.call_id,
+      model: call.model ?? null,
+      provider: call.provider ?? null,
+      started_at: call.started_at === undefined ? null : new Date(call.started_at),
+      ended_at: call.ended_at === undefined ? null : new Date(call.ended_at),
+      ...Object.fromEntries(
+        CALL_COUNTS.map((c) => [c, call[c] === undefined ? null : BigInt(call[c] as number)]),
+      ),
+      stop_reason: call.stop_reason ?? null,
+      error: call.error ?? null,
+    }));
   }
 
   /** One feed page, content tables first and the cursor last (F10.10). Every step is
@@ -1191,8 +1266,10 @@ export class LanceIndex implements IndexStore {
     const refused: string[] = [];
     const sessionRows: SessionRow[] = [];
     const eventRows: Record<string, unknown>[] = [];
-    /** Sessions whose earlier rows go: all of them, or all but these traces. */
-    const doomed: { archive: string; keep: string[] }[] = [];
+    const callRows: Record<string, unknown>[] = [];
+    /** Sessions whose earlier rows go: all of them, or all but these traces (of `events`, and
+     * of `llm_calls`). */
+    const doomed: { archive: string; keep: string[]; keepCalls: string[] }[] = [];
     const restamp: IndexedSession[] = [];
     /** Continued sessions whose earlier rows without a time of their own take its new one. */
     const retimed: IndexedSession[] = [];
@@ -1215,6 +1292,8 @@ export class LanceIndex implements IndexStore {
       }
       const rows = this.eventRows(update);
       eventRows.push(...rows);
+      const calls = this.callRows(update);
+      callRows.push(...calls);
       // A redaction backfill: the text it replaced, even rewritten in place under the same
       // ids, stays in the files until a scrub.
       if (update.scrub) scrub = true;
@@ -1222,6 +1301,7 @@ export class LanceIndex implements IndexStore {
         doomed.push({
           archive: session.archive_id,
           keep: [...new Set(rows.map((r) => r.content_hash as string))],
+          keepCalls: [...new Set(calls.map((r) => r.content_hash as string))],
         });
       } else if (copiedChanged(existing.session, session)) {
         restamp.push(session);
@@ -1247,12 +1327,19 @@ export class LanceIndex implements IndexStore {
             visibility: "owner",
             updated_at: "",
             traces: [],
+            event_count: 0,
           },
           0,
         ),
         updated_ms: 0n,
       };
-      const row = { ...base, traces: [], read_at: BigInt(removal.read_at), removed: true };
+      const row = {
+        ...base,
+        traces: [],
+        event_count: 0,
+        read_at: BigInt(removal.read_at),
+        removed: true,
+      };
       sessionRows.push(row);
       held.set(removal.archive, {
         row,
@@ -1260,11 +1347,12 @@ export class LanceIndex implements IndexStore {
         readAt: removal.read_at,
         removed: true,
       });
-      doomed.push({ archive: removal.archive, keep: [] });
+      doomed.push({ archive: removal.archive, keep: [], keepCalls: [] });
     }
     const tables = {
       events: await this.table(meta, gen, "events"),
       sessions: await this.table(meta, gen, "sessions"),
+      llm_calls: await this.table(meta, gen, "llm_calls"),
     };
     // A continuation that changes a copied field (visibility, branch, labels, …) writes the
     // session's earlier rows again with it. One that only moves the session's time writes
@@ -1315,18 +1403,36 @@ export class LanceIndex implements IndexStore {
           ),
         );
     }
-    // 3. events again: the replaced and removed sessions' rows the page did not write.
+    // The sessions' model calls, in the same commit as their events.
+    await step("llm_calls");
+    if (callRows.length > 0) {
+      await tables.llm_calls
+        .mergeInsert("id")
+        .whenMatchedUpdateAll()
+        .whenNotMatchedInsertAll()
+        .execute(
+          makeArrowTable(
+            latest(callRows, (r) => String(r.id)),
+            { schema: SCHEMAS.llm_calls },
+          ),
+        );
+    }
+    // 3. events and llm_calls again: the replaced and removed sessions' rows the page did not
+    // write.
     await step("delete");
     if (doomed.length > 0) {
-      const predicate = doomed
-        .map(
-          ({ archive, keep }) =>
-            `(archive_id = ${sqlString(archive)}${
+      const predicate = (keepOf: (d: (typeof doomed)[number]) => string[]) =>
+        doomed
+          .map((d) => {
+            const keep = keepOf(d);
+            return `(archive_id = ${sqlString(d.archive)}${
               keep.length > 0 ? ` AND content_hash NOT IN (${sqlList(keep)})` : ""
-            })`,
-        )
-        .join(" OR ");
-      await tables.events.delete(`owner = ${sqlString(owner)} AND (${predicate})`);
+            })`;
+          })
+          .join(" OR ");
+      await tables.events.delete(`owner = ${sqlString(owner)} AND (${predicate((d) => d.keep)})`);
+      const calls = `owner = ${sqlString(owner)} AND (${predicate((d) => d.keepCalls)})`;
+      if ((await tables.llm_calls.countRows(calls)) > 0) await tables.llm_calls.delete(calls);
     }
     // Before the cursor moves past it: deleted text must leave the bucket (F10.12).
     await step("scrub_due");
@@ -1558,9 +1664,15 @@ export class LanceIndex implements IndexStore {
 
   /** `optimize()` every table of `gen`: compaction, new rows into the indexes, old versions
    * pruned. False when aborted part-way. */
+  /** The tables a generation has: one written under schema 1, still live while its rebuild
+   * catches up, has no `llm_calls`. */
+  private kinds(meta: Meta, gen: string): readonly Kind[] {
+    return this.servable(meta, gen) ? KINDS : KINDS.filter((k) => k !== "llm_calls");
+  }
+
   private async optimize(meta: Meta, gen: string, signal?: AbortSignal): Promise<boolean> {
     const grace = this.options.grace ?? 15 * MINUTE;
-    for (const kind of KINDS) {
+    for (const kind of this.kinds(meta, gen)) {
       if (signal?.aborted) return false;
       await (await this.table(meta, gen, kind)).optimize({
         cleanupOlderThan: new Date(this.now() - grace),
@@ -1572,7 +1684,9 @@ export class LanceIndex implements IndexStore {
   /** The tables' versions: what changes when anything was committed. */
   private async versions(meta: Meta, gen: string): Promise<string> {
     const out: number[] = [];
-    for (const kind of KINDS) out.push(await (await this.table(meta, gen, kind)).version());
+    for (const kind of this.kinds(meta, gen)) {
+      out.push(await (await this.table(meta, gen, kind)).version());
+    }
     return out.join(",");
   }
 
@@ -1677,7 +1791,7 @@ export class LanceIndex implements IndexStore {
         [SCRUB_TRIED]: meta.get(SCRUB_REQUESTED) ?? "",
       });
       for (const gen of gens) {
-        for (const kind of KINDS) {
+        for (const kind of this.kinds(meta, gen)) {
           await run.beat();
           meta = await this.meta(true);
           const old = await this.table(meta, gen, kind);

@@ -1,5 +1,6 @@
 import { parseDuration } from "@seshi/config";
 import {
+  type EventRole,
   labelPairs,
   type SearchRequest,
   type SearchSort,
@@ -23,7 +24,7 @@ const STRINGS = [
   "cursor",
 ];
 const NUMBERS = ["limit", "matches"];
-const KNOWN = new Set([...STRINGS, ...NUMBERS, "sort", "label"]);
+const KNOWN = new Set([...STRINGS, ...NUMBERS, "sort", "label", "role"]);
 
 export function searchRequestOf(url: URL): SearchRequest {
   const params = url.searchParams;
@@ -46,6 +47,11 @@ export function searchRequestOf(url: URL): SearchRequest {
   }
   const labels = labelsOf(params.getAll("label"));
   if (labels) request.labels = labels;
+  const role = params.get("role");
+  if (role !== null && role !== "") {
+    // Checked against the roles in `checkRequest`.
+    request.role = role.split(",").map((r) => r.trim() as EventRole);
+  }
   const sort = params.get("sort");
   if (sort !== null && sort !== "") request.sort = sort as SearchSort;
   return request as unknown as SearchRequest;

@@ -7,6 +7,23 @@ export type SearchSort = "relevance" | "recent";
 
 export const SEARCH_SORTS: readonly SearchSort[] = ["relevance", "recent"];
 
+/** The most of an event's text the index keeps: the rest is not searched (`read_session` reads
+ * it, from the store). */
+export const MAX_SEARCH_CHARS = 32 * 1024;
+
+/** How much of each role's text the index keeps by default (`[search] max_chars`): tool output
+ * and observations 8 KiB, which keeps an index of every role under 2.5 times one of prompts,
+ * answers and tool calls alone (docs/seshi/session-tools.md, T5); 32 KiB for the rest. */
+export const DEFAULT_SEARCH_MAX_CHARS: Readonly<Record<EventRole, number>> = {
+  user: MAX_SEARCH_CHARS,
+  assistant: MAX_SEARCH_CHARS,
+  tool_call: MAX_SEARCH_CHARS,
+  tool_result: 8 * 1024,
+  system: MAX_SEARCH_CHARS,
+  observation: 8 * 1024,
+  reasoning: MAX_SEARCH_CHARS,
+};
+
 /** A search (F10.1): keywords plus filters. Every filter narrows; none widens what the caller
  * may read, which the server decides (F10.4). */
 export interface SearchRequest {
@@ -36,6 +53,9 @@ export interface SearchRequest {
   labels?: Labels;
   /** Only sessions written through this source (`upload`, or a configured source id). */
   source?: string;
+  /** Only records of these roles (`tool_result` for tool output, `user` for prompts). `GET
+   * /v1/search` takes them comma-separated. */
+  role?: EventRole[];
   /** Only records at or after this time (RFC 3339). Records without a timestamp use their
    * session's last update. */
   since?: string;
@@ -56,6 +76,9 @@ export interface SearchRequest {
 export interface SearchMatch {
   content_hash: string;
   event_index: number;
+  /** The record's place in the session, from 0 across its traces: `read_session`'s `seq`, to
+   * read around it. */
+  seq: number;
   role: EventRole;
   tool_name?: string;
   timestamp?: string;

@@ -1,3 +1,4 @@
+import { DEFAULT_SEARCH_MAX_CHARS, MAX_SEARCH_CHARS } from "@seshi/model";
 import * as z from "zod";
 import { duration } from "../units";
 import { storeUrl } from "./common";
@@ -14,6 +15,28 @@ export const SEARCH_EVENT_ROLES = [
 ] as const;
 
 export const SEARCH_BACKENDS = ["sqlite", "lance"] as const;
+
+/** The least a role's cap may be: enough for a command's error or a file's head. */
+const MIN_SEARCH_CHARS = 256;
+
+const roleCap = (role: (typeof SEARCH_EVENT_ROLES)[number]) =>
+  z
+    .int()
+    .min(MIN_SEARCH_CHARS)
+    .max(MAX_SEARCH_CHARS)
+    .default(DEFAULT_SEARCH_MAX_CHARS[role])
+    .describe(`Characters of a ${role} event indexed (${DEFAULT_SEARCH_MAX_CHARS[role]}).`);
+
+export const maxCharsSection = z
+  .strictObject(
+    Object.fromEntries(SEARCH_EVENT_ROLES.map((role) => [role, roleCap(role)])) as {
+      [R in (typeof SEARCH_EVENT_ROLES)[number]]: ReturnType<typeof roleCap>;
+    },
+  )
+  .prefault({})
+  .describe(
+    `How much of each role's text is indexed, in characters (${MIN_SEARCH_CHARS} to ${MAX_SEARCH_CHARS}): the rest is not searched, and read_session reads it from the store. Tool output and observations 8192, the rest 32768. Changing one rebuilds the index.`,
+  );
 
 export const lanceSection = z
   .strictObject({
@@ -122,10 +145,11 @@ export const searchSection = z
     events: z
       .array(z.enum(SEARCH_EVENT_ROLES))
       .min(1)
-      .default(["user", "assistant", "tool_call"])
+      .default([...SEARCH_EVENT_ROLES])
       .describe(
-        "Which trace events are indexed, by role: prompts, assistant text, and tool calls (names and inputs, so file paths and commands) by default (F10.1).",
+        "Which trace events are indexed, by role: every role by default (F10.1), each cut to its max_chars. Changing it rebuilds the index.",
       ),
+    max_chars: maxCharsSection,
     lance: lanceSection,
   })
   .prefault({})

@@ -930,6 +930,8 @@ class SearchRequest(Request):
     label: list[str] | None = None
     """Labels a session must carry, each `key=value` (`SeshiClient.search` takes a dict)."""
     source: str | None = None
+    role: str | None = None
+    """Only records of these roles, comma-separated (`SeshiClient.search` takes a list)."""
     since: str | None = None
     until: str | None = None
     sort: SearchSort | None = None
@@ -943,6 +945,8 @@ class SearchRequest(Request):
 class SearchMatch(Response):
     content_hash: str
     event_index: int
+    seq: int
+    """The record's place in the session, from 0 across its traces."""
     role: Open[EventRole]
     tool_name: str | None = None
     timestamp: str | None = None

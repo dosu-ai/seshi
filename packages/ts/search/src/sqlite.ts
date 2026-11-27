@@ -11,6 +11,7 @@ import type {
   CommitResult,
   FeedPosition,
   FeedRow,
+  IndexedLlmCall,
   IndexedSession,
   IndexOptions,
   IndexState,
@@ -21,6 +22,7 @@ import type {
   SessionListQuery,
   SessionUpdate,
 } from "./backend";
+import { maxCharsOf } from "./backend";
 import { MEMORY_INDEX, tryRestrictToOwner } from "./paths";
 import type { MatchItem, MatchTree } from "./query";
 import { indexText, MATCH_END, MATCH_START } from "./snippet";
@@ -28,8 +30,9 @@ import { indexText, MATCH_END, MATCH_START } from "./snippet";
 /** The index's own schema: a file built under another is wiped and rebuilt from the change
  * feeds. 3: sessions' `agent` column is `format`, and the feed's copies of entries written
  * before seshi 0.16 carry the format filled in from the session. 4: sessions gained `labels`. 5:
- * sessions' `repo`, `harness`, `agent_version` and `models`. */
-export const INDEX_SCHEMA = "seshi/search-index/5";
+ * sessions' `repo`, `harness`, `agent_version` and `models`. 6: events' `seq`, `tool_call_id`, `ok`
+ * and `chars`, sessions' `event_count`, and the `llm_calls` table. */
+export const INDEX_SCHEMA = "seshi/search-index/6";
 
 const SNIPPET_TOKENS = 24;
 
@@ -71,6 +74,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   updated_at TEXT NOT NULL,
   updated_ms INTEGER NOT NULL,
   traces TEXT NOT NULL,
+  event_count INTEGER NOT NULL DEFAULT 0,
   read_ms INTEGER NOT NULL DEFAULT 0,
   removed INTEGER NOT NULL DEFAULT 0,
   UNIQUE (owner, archive_id)
@@ -80,11 +84,35 @@ CREATE TABLE IF NOT EXISTS events (
   session INTEGER NOT NULL,
   content_hash TEXT NOT NULL,
   event_index INTEGER NOT NULL,
+  seq INTEGER NOT NULL,
   role TEXT NOT NULL,
   tool_name TEXT,
-  ts INTEGER
+  tool_call_id TEXT,
+  ok INTEGER,
+  ts INTEGER,
+  chars INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS events_by_session ON events (session);
+CREATE TABLE IF NOT EXISTS llm_calls (
+  id INTEGER PRIMARY KEY,
+  session INTEGER NOT NULL,
+  content_hash TEXT NOT NULL,
+  call_id TEXT NOT NULL,
+  model TEXT,
+  provider TEXT,
+  started_at INTEGER,
+  ended_at INTEGER,
+  duration_ms INTEGER,
+  input_tokens INTEGER,
+  output_tokens INTEGER,
+  cache_read_input_tokens INTEGER,
+  cache_creation_input_tokens INTEGER,
+  reasoning_tokens INTEGER,
+  total_tokens INTEGER,
+  stop_reason TEXT,
+  error TEXT,
+  UNIQUE (session, content_hash, call_id)
+);
 CREATE VIRTUAL TABLE IF NOT EXISTS events_text USING fts5 (
   text,
   tokenize = 'unicode61 remove_diacritics 2'
@@ -93,6 +121,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS events_text USING fts5 (
 
 const DROP = `
 DROP TABLE IF EXISTS events_text;
+DROP TABLE IF EXISTS llm_calls;
 DROP TABLE IF EXISTS events;
 DROP TABLE IF EXISTS sessions;
 DROP TABLE IF EXISTS seen;
@@ -123,6 +152,7 @@ interface SessionRow {
   updated_at: string;
   updated_ms: number;
   traces: string;
+  event_count: number;
   read_ms: number;
   removed: number;
 }
@@ -148,6 +178,7 @@ function sessionOf(row: SessionRow): IndexedSession {
     ...(row.ended_at !== null ? { ended_at: row.ended_at } : {}),
     updated_at: row.updated_at,
     traces: JSON.parse(row.traces) as string[],
+    event_count: row.event_count,
   };
 }
 
@@ -180,11 +211,28 @@ export function fts5Match(tree: MatchTree): string {
  * match again for every id, so one search with many matches stalls the server. As an
  * expression it is only a filter, and FTS5 reads the match once. */
 export function snippetsSql(n: number): string {
-  return `SELECT e.id AS id, e.content_hash, e.event_index, e.role, e.tool_name, e.ts,
+  return `SELECT e.id AS id, e.content_hash, e.event_index, e.seq, e.role, e.tool_name, e.ts,
       snippet(events_text, 0, ?, ?, '…', ${SNIPPET_TOKENS}) AS marked
     FROM events_text JOIN events e ON e.id = events_text.rowid
     WHERE events_text MATCH ? AND events_text.rowid+0 IN (${placeholders(n)})`;
 }
+
+/** The columns of `llm_calls` an update writes, after its keys. */
+const CALL_COLUMNS = [
+  "model",
+  "provider",
+  "started_at",
+  "ended_at",
+  "duration_ms",
+  "input_tokens",
+  "output_tokens",
+  "cache_read_input_tokens",
+  "cache_creation_input_tokens",
+  "reasoning_tokens",
+  "total_tokens",
+  "stop_reason",
+  "error",
+] as const satisfies readonly (keyof IndexedLlmCall)[];
 
 /** Add the session filters every read shares (who may see it, and the session's fields) to
  * `where`, over `sessions` as `s`. False when nothing can match: no owners, or an own-only viewer
@@ -278,6 +326,7 @@ export class SqliteIndex implements IndexStore {
       schema: INDEX_SCHEMA,
       deployment: options.deployment,
       events: JSON.stringify([...options.events].sort()),
+      max_chars: JSON.stringify(maxCharsOf(options)),
       ...(options.scope !== undefined ? { scope: options.scope } : {}),
       ...(options.feed ? { feed: "kept" } : {}),
     };
@@ -338,11 +387,13 @@ export class SqliteIndex implements IndexStore {
     return row === null || row.removed === 1 ? null : sessionOf(row);
   }
 
+  /** Drop what the index holds of a session's traces: its events and its model calls. */
   private dropEvents(sessionId: number): void {
     this.db
       .query("DELETE FROM events_text WHERE rowid IN (SELECT id FROM events WHERE session = ?)")
       .run(sessionId);
     this.db.query("DELETE FROM events WHERE session = ?").run(sessionId);
+    this.db.query("DELETE FROM llm_calls WHERE session = ?").run(sessionId);
   }
 
   /** Index a session's new head (F10.2), as one transaction. Returns false, changing nothing,
@@ -379,6 +430,7 @@ export class SqliteIndex implements IndexStore {
         session.updated_at,
         Date.parse(session.updated_at) || 0,
         JSON.stringify(session.traces),
+        session.event_count,
         readAt,
       ];
       let id: number;
@@ -388,8 +440,8 @@ export class SqliteIndex implements IndexStore {
             `INSERT INTO sessions (owner, archive_id, format, session_id, origin_agent,
                native_session_id, project, branch, repo, harness, agent_version, models,
                labels, source_id, visibility, started_at, ended_at, updated_at, updated_ms,
-               traces, read_ms)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+               traces, event_count, read_ms)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
           )
           .get(session.owner, session.archive_id, ...values) as { id: number };
         id = row.id;
@@ -402,14 +454,15 @@ export class SqliteIndex implements IndexStore {
                native_session_id = ?, project = ?, branch = ?, repo = ?, harness = ?,
                agent_version = ?, models = ?, labels = ?, source_id = ?, visibility = ?,
                started_at = ?, ended_at = ?, updated_at = ?, updated_ms = ?, traces = ?,
-               read_ms = ?, removed = 0
+               event_count = ?, read_ms = ?, removed = 0
              WHERE id = ?`,
           )
           .run(...values, id);
       }
       const insertEvent = this.db.query(
-        `INSERT INTO events (session, content_hash, event_index, role, tool_name, ts)
-         VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
+        `INSERT INTO events (session, content_hash, event_index, seq, role, tool_name,
+           tool_call_id, ok, ts, chars)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
       );
       const insertText = this.db.query("INSERT INTO events_text (rowid, text) VALUES (?, ?)");
       for (const event of events) {
@@ -419,11 +472,29 @@ export class SqliteIndex implements IndexStore {
           id,
           event.content_hash,
           event.event_index,
+          event.seq,
           event.role,
           event.tool_name ?? null,
+          event.tool_call_id ?? null,
+          event.ok === undefined ? null : event.ok ? 1 : 0,
           event.timestamp ?? null,
+          event.chars,
         ) as { id: number };
         insertText.run(row.id, text);
+      }
+      const insertCall = this.db.query(
+        `INSERT INTO llm_calls (session, content_hash, call_id, ${CALL_COLUMNS.join(", ")})
+         VALUES (?, ?, ?, ${placeholders(CALL_COLUMNS.length)})
+         ON CONFLICT (session, content_hash, call_id) DO UPDATE SET
+           ${CALL_COLUMNS.map((c) => `${c} = excluded.${c}`).join(", ")}`,
+      );
+      for (const call of update.llm_calls ?? []) {
+        insertCall.run(
+          id,
+          call.content_hash,
+          call.call_id,
+          ...CALL_COLUMNS.map((c) => call[c] ?? null),
+        );
       }
       return true;
     });
@@ -449,7 +520,9 @@ export class SqliteIndex implements IndexStore {
       }
       this.dropEvents(existing.id);
       this.db
-        .query("UPDATE sessions SET removed = 1, traces = '[]', read_ms = ? WHERE id = ?")
+        .query(
+          "UPDATE sessions SET removed = 1, traces = '[]', event_count = 0, read_ms = ? WHERE id = ?",
+        )
         .run(readAt, existing.id);
       return true;
     });
@@ -460,6 +533,11 @@ export class SqliteIndex implements IndexStore {
     const where: string[] = ["events_text MATCH ?", "s.removed = 0"];
     const params: SQLQueryBindings[] = [match];
     if (!sessionFilters(q, where, params)) return { total: 0, hits: [] };
+    if (q.roles !== undefined) {
+      if (q.roles.length === 0) return { total: 0, hits: [] };
+      where.push(`e.role IN (${placeholders(q.roles.length)})`);
+      params.push(...q.roles);
+    }
     if (q.since !== undefined) {
       where.push("coalesce(e.ts, s.updated_ms) >= ?");
       params.push(q.since);
@@ -572,6 +650,7 @@ export class SqliteIndex implements IndexStore {
       id: number;
       content_hash: string;
       event_index: number;
+      seq: number;
       role: string;
       tool_name: string | null;
       ts: number | null;
@@ -585,6 +664,7 @@ export class SqliteIndex implements IndexStore {
       list.push({
         content_hash: d.content_hash,
         event_index: d.event_index,
+        seq: d.seq,
         role: d.role as EventRole,
         ...(d.tool_name !== null ? { tool_name: d.tool_name } : {}),
         ...(d.ts !== null ? { timestamp: d.ts } : {}),
@@ -810,6 +890,7 @@ export class SqliteIndex implements IndexStore {
       this.setMeta("generation", generation);
       this.db.run("DELETE FROM events_text");
       this.db.run("DELETE FROM events");
+      this.db.run("DELETE FROM llm_calls");
       this.db.run("DELETE FROM sessions");
       this.db.run("DELETE FROM seen");
       this.db.run("DELETE FROM feeds");

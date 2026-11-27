@@ -1497,6 +1497,12 @@ paths:
           in: query
           description: Only sessions written through this source (`upload`, or a configured source id).
           schema: { type: string, maxLength: 512 }
+        - name: role
+          in: query
+          description: |
+            Only records of these roles, comma-separated: `tool_result` for tool output, `user`
+            for prompts. One the server does not know is refused (400 `bad_query`).
+          schema: { type: string, maxLength: 512, example: "tool_result,observation" }
         - name: since
           in: query
           description: |
@@ -3634,10 +3640,16 @@ components:
         One matching record: the trace and event it is in, and a snippet. For what the assistant
         said alongside tool calls (which the trace's events leave out), `event_index` is the
         record's first `tool_call` event.
-      required: [content_hash, event_index, role, snippet, highlights]
+      required: [content_hash, event_index, seq, role, snippet, highlights]
       properties:
         content_hash: { type: string, pattern: "^[0-9a-f]{64}$" }
         event_index: { type: integer, minimum: 0 }
+        seq:
+          type: integer
+          minimum: 0
+          description: |
+            The record's place in the session, from 0 across its traces: the `seq` that reads
+            around it in the session's events.
         role:
           type: string
           enum: [user, assistant, tool_call, tool_result, system, observation, reasoning]

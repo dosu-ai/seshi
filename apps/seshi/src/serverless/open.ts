@@ -500,6 +500,7 @@ export async function openServerless(options: ServerlessOpenOptions): Promise<Se
             settings: {
               ...(config.search.path ? { path: config.search.path } : {}),
               events: config.search.events,
+              maxChars: config.search.max_chars,
             },
             ...(options.now ? { now: options.now } : {}),
             indexer: {

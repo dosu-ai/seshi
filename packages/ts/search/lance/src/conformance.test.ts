@@ -10,15 +10,18 @@
  * what LanceDB alone does (generations beside the live one, the scrub, caps) is in
  * lance.test.ts. */
 
+import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { connect } from "@lancedb/lancedb";
 import { BUILTIN_FORMATS, FormatRegistry } from "@seshi/formats";
 import type { ChangeEntry, EventRole } from "@seshi/model";
 import { StoreSeshi, setVisibility, tombstone } from "@seshi/pipeline";
 import type {
   BackendQuery,
   IndexedEvent,
+  IndexedLlmCall,
   IndexedSession,
   IndexOptions,
   IndexStore,
@@ -43,6 +46,7 @@ import { lanceIndex } from "./index";
 
 const H = (n: number) => n.toString(16).padStart(64, "0");
 const EVENTS: readonly EventRole[] = ["user", "assistant", "tool_call"];
+const ALL: readonly EventRole[] = [...EVENTS, "tool_result", "system", "observation", "reasoning"];
 
 const s3 = {
   endpoint: process.env.SESHI_TEST_S3_ENDPOINT,
@@ -92,6 +96,80 @@ interface Backend {
   /** A fresh location for one test. */
   location(dir: string): string;
   open(location: string): OpenIndex;
+  /** The live generation's rows of a table, as stored, for the columns no query returns yet
+   * (`sql` will). Only for a backend on this machine. */
+  rows?(location: string, table: "events" | "llm_calls"): Promise<Raw[]>;
+}
+
+type Raw = Record<string, unknown>;
+
+/** A stored value as JavaScript: Arrow's `bigint`s and times as numbers, SQLite's 0 and 1 for
+ * `ok` as booleans. */
+function plain(row: Raw): Raw {
+  return Object.fromEntries(
+    Object.entries(row).map(([k, v]) => [
+      k,
+      typeof v === "bigint"
+        ? Number(v)
+        : v instanceof Date
+          ? v.getTime()
+          : k === "ok" && typeof v === "number"
+            ? v === 1
+            : v,
+    ]),
+  );
+}
+
+const EVENT_COLUMNS = [
+  "archive_id",
+  "content_hash",
+  "event_index",
+  "seq",
+  "role",
+  "tool_call_id",
+  "ok",
+  "chars",
+];
+const CALL_COLUMNS = [
+  "archive_id",
+  "content_hash",
+  "call_id",
+  "model",
+  "started_at",
+  "input_tokens",
+  "output_tokens",
+  "error",
+];
+
+function pick(rows: Raw[], columns: readonly string[]): Raw[] {
+  return rows
+    .map((r) => plain(Object.fromEntries(columns.map((c) => [c, r[c] ?? null]))))
+    .sort((a, b) => (JSON.stringify(a) < JSON.stringify(b) ? -1 : 1));
+}
+
+async function sqliteRows(path: string, table: "events" | "llm_calls"): Promise<Raw[]> {
+  const db = new Database(path, { readonly: true });
+  try {
+    return db
+      .query(`SELECT s.archive_id, t.* FROM ${table} t JOIN sessions s ON s.id = t.session`)
+      .all() as Raw[];
+  } finally {
+    db.close();
+  }
+}
+
+async function lanceRows(uri: string, table: "events" | "llm_calls"): Promise<Raw[]> {
+  const root = await connect(uri);
+  const meta = new Map(
+    (await (await root.openTable("meta")).query().toArray()).map((r) => [
+      String(r.key),
+      String(r.value),
+    ]),
+  );
+  const gen = meta.get("active") as string;
+  const db = await connect(join(uri, gen));
+  const name = meta.get(`${gen}.table.${table}`) ?? table;
+  return (await (await db.openTable(name)).query().toArray()) as Raw[];
 }
 
 let run = 0;
@@ -101,12 +179,14 @@ const BACKENDS: Backend[] = [
     skip: false,
     location: (dir) => join(dir, "index.sqlite"),
     open: (path) => sqliteIndex({ path }),
+    rows: sqliteRows,
   },
   {
     name: "LanceDB on a folder",
     skip: false,
     location: (dir) => join(dir, "lance"),
     open: (uri) => lanceIndex({ uri, readConsistency: 0 }),
+    rows: lanceRows,
   },
   {
     name: "LanceDB on S3",
@@ -149,12 +229,22 @@ function session(n: number, fields: Partial<IndexedSession> = {}): IndexedSessio
     visibility: "org",
     updated_at: "2026-11-14T09:00:00.000Z",
     traces: [H(100 + n)],
+    event_count: 0,
     ...fields,
   };
 }
 
 function event(text: string, fields: Partial<IndexedEvent> = {}): IndexedEvent {
-  return { content_hash: H(100), event_index: 0, role: "user", text, ...fields };
+  const index = fields.event_index ?? 0;
+  return {
+    content_hash: H(100),
+    event_index: index,
+    seq: index,
+    role: "user",
+    text,
+    chars: text.length,
+    ...fields,
+  };
 }
 
 /** A session of one trace, with these texts as its records. */
@@ -315,6 +405,170 @@ describe.each(BACKENDS)("the search index on $name", (backend) => {
       expect((await query(index, "beta")).total).toBe(0);
       expect((await query(index, "gamma")).total).toBe(1);
       expect((await index.state()).events).toBe(1);
+    });
+
+    it("keeps each record's place, tool call id, outcome and full length, and gives its place on a match", async () => {
+      const index = await open({ events: ALL });
+      const s = session(1);
+      const hash = s.traces[0] as string;
+      await indexed(index, {
+        session: { ...s, event_count: 4 },
+        events: [
+          event("run the suite", { content_hash: hash, event_index: 0, seq: 0 }),
+          event("npm test", {
+            content_hash: hash,
+            event_index: 1,
+            seq: 1,
+            role: "tool_call",
+            tool_name: "Bash",
+            tool_call_id: "t1",
+          }),
+          // What the assistant said alongside the call: the call's index, and its own role.
+          event("running it now", {
+            content_hash: hash,
+            event_index: 1,
+            seq: 1,
+            role: "assistant",
+          }),
+          event("suite failed loudly", {
+            content_hash: hash,
+            event_index: 3,
+            seq: 3,
+            role: "tool_result",
+            tool_name: "Bash",
+            tool_call_id: "t1",
+            ok: false,
+            chars: 9_000,
+          }),
+        ],
+        replace: true,
+        read_at: 1,
+      });
+      const failed = await query(index, "failed");
+      expect(failed.hits[0]?.matches[0]).toMatchObject({
+        seq: 3,
+        event_index: 3,
+        role: "tool_result",
+      });
+      expect((await query(index, "running")).hits[0]?.matches[0]).toMatchObject({
+        seq: 1,
+        role: "assistant",
+      });
+      expect((await query(index, "npm")).hits[0]?.matches[0]).toMatchObject({
+        seq: 1,
+        role: "tool_call",
+      });
+      expect((await index.state()).events).toBe(4);
+      expect(
+        (await index.sessions(await index.generation(), "alice", [H(1)])).get(H(1))?.event_count,
+      ).toBe(4);
+      if (!backend.rows) return;
+      expect(pick(await backend.rows(where, "events"), EVENT_COLUMNS)).toEqual(
+        pick(
+          [
+            { seq: 0, event_index: 0, role: "user", chars: 13 },
+            { seq: 1, event_index: 1, role: "tool_call", tool_call_id: "t1", chars: 8 },
+            { seq: 1, event_index: 1, role: "assistant", chars: 14 },
+            {
+              seq: 3,
+              event_index: 3,
+              role: "tool_result",
+              tool_call_id: "t1",
+              ok: false,
+              chars: 9_000,
+            },
+          ].map((r) => ({ archive_id: H(1), content_hash: hash, ...r })),
+          EVENT_COLUMNS,
+        ),
+      );
+    });
+
+    it("searches only the roles asked for", async () => {
+      const index = await open({ events: ALL });
+      await indexed(
+        index,
+        {
+          ...replace(1, []),
+          events: [
+            event("deploy the api", { content_hash: H(101) }),
+            event("deploy failed: quota", {
+              content_hash: H(101),
+              event_index: 1,
+              role: "tool_result",
+            }),
+          ],
+        },
+        replace(2, ["deploy the web app"]),
+      );
+      expect(await names(index, "deploy")).toEqual(["s1", "s2"]);
+      const output = await query(index, "deploy", { roles: ["tool_result"] });
+      expect(output.total).toBe(1);
+      expect(output.hits.map((h) => h.matches.map((m) => m.role))).toEqual([["tool_result"]]);
+      expect(await names(index, "deploy", { roles: ["user", "observation"] })).toEqual([
+        "s1",
+        "s2",
+      ]);
+      expect(await names(index, "deploy", { roles: ["reasoning"] })).toEqual([]);
+      expect(await names(index, "deploy", { roles: [] })).toEqual([]);
+    });
+
+    it("keeps a session's model calls beside its events: continued, replaced and removed with them", async () => {
+      const index = await open();
+      const call = (hash: string, id: string, fields: Partial<IndexedLlmCall> = {}) => ({
+        content_hash: hash,
+        call_id: id,
+        model: "opus",
+        started_at: Date.parse("2026-11-14T09:00:00.000Z"),
+        input_tokens: 100,
+        output_tokens: 20,
+        ...fields,
+      });
+      await indexed(
+        index,
+        { ...replace(1, ["first"]), llm_calls: [call(H(101), "a"), call(H(101), "b")] },
+        { ...replace(2, ["other"]), llm_calls: [call(H(102), "a", { error: "overloaded" })] },
+      );
+      const calls = async () =>
+        backend.rows
+          ? pick(await backend.rows(where, "llm_calls"), CALL_COLUMNS).map(
+              (r) =>
+                `${Number.parseInt(r.archive_id as string, 16)}:${Number.parseInt(r.content_hash as string, 16)}:${r.call_id}`,
+            )
+          : [];
+      if (backend.rows) {
+        expect(pick(await backend.rows(where, "llm_calls"), CALL_COLUMNS)).toContainEqual(
+          plain({
+            archive_id: H(2),
+            content_hash: H(102),
+            call_id: "a",
+            model: "opus",
+            started_at: Date.parse("2026-11-14T09:00:00.000Z"),
+            input_tokens: 100,
+            output_tokens: 20,
+            error: "overloaded",
+          }),
+        );
+        expect(await calls()).toEqual(["1:101:a", "1:101:b", "2:102:a"]);
+      }
+      // A continuation adds its trace's calls.
+      await indexed(index, {
+        session: session(1, { traces: [H(101), H(201)] }),
+        events: [event("second", { content_hash: H(201) })],
+        llm_calls: [call(H(201), "a")],
+        replace: false,
+        base: [H(101)],
+        read_at: 2,
+      });
+      if (backend.rows) expect(await calls()).toEqual(["1:101:a", "1:101:b", "1:201:a", "2:102:a"]);
+      // A replace keeps only the new traces' calls; a session's calls go with it.
+      await indexed(index, {
+        ...replace(1, ["third"], { traces: [H(301)] }, 3),
+        llm_calls: [call(H(301), "z")],
+      });
+      if (backend.rows) expect(await calls()).toEqual(["1:301:z", "2:102:a"]);
+      await page(index, [], [{ archive: H(2), read_at: 5, scrub: false }]);
+      if (backend.rows) expect(await calls()).toEqual(["1:301:z"]);
+      expect((await query(index, "third")).total).toBe(1);
     });
 
     it("rewrites a continued session's earlier records when its visibility changes", async () => {

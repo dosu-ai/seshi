@@ -1,6 +1,7 @@
 import { OwnerAliases } from "@seshi/auth";
 import {
   type AllChangesPage,
+  DEFAULT_SEARCH_MAX_CHARS,
   type EventRole,
   type Labels,
   labelsProblems,
@@ -54,6 +55,8 @@ export interface SearchSettings {
    * Not read when `SearchServiceOptions.open` is given. */
   path?: string;
   events: readonly EventRole[];
+  /** How much of each role's text is indexed (`DEFAULT_SEARCH_MAX_CHARS` when omitted). */
+  maxChars?: Readonly<Record<EventRole, number>>;
 }
 
 export interface SearchServiceOptions {
@@ -186,6 +189,7 @@ export function checkRequest(request: SearchRequest, aliases = new OwnerAliases(
   const model = text(request.model, "model");
   const labels = labelFilter(request.labels);
   const source = text(request.source, "source");
+  const roles = roleFilter(request.role);
   return {
     q: request.q,
     query: {
@@ -199,6 +203,7 @@ export function checkRequest(request: SearchRequest, aliases = new OwnerAliases(
       ...(model !== undefined ? { model } : {}),
       ...(labels !== undefined ? { labels } : {}),
       ...(source !== undefined ? { source } : {}),
+      ...(roles !== undefined ? { roles } : {}),
       ...(since !== undefined ? { since } : {}),
       ...(until !== undefined ? { until } : {}),
       sort: sort as SearchSort,
@@ -207,6 +212,23 @@ export function checkRequest(request: SearchRequest, aliases = new OwnerAliases(
       offset,
     },
   };
+}
+
+/** Every role a trace event can have. */
+const ROLES = Object.keys(DEFAULT_SEARCH_MAX_CHARS) as EventRole[];
+
+/** The role filter: roles a trace event can have, each once. */
+function roleFilter(role: SearchRequest["role"]): EventRole[] | undefined {
+  if (role === undefined || role === null) return undefined;
+  const given = Array.isArray(role) ? role : [role];
+  const roles: EventRole[] = [];
+  for (const r of given) {
+    if (typeof r !== "string" || !ROLES.includes(r as EventRole)) {
+      throw new SearchQueryError(`role must be one or more of ${ROLES.join(", ")}`);
+    }
+    if (!roles.includes(r as EventRole)) roles.push(r as EventRole);
+  }
+  return roles.length > 0 ? roles : undefined;
 }
 
 /** Index pages one listing reads at most to fill a page the live check left short. */
@@ -347,6 +369,7 @@ function resultOf(hit: BackendHit): SearchResult {
       return {
         content_hash: m.content_hash,
         event_index: m.event_index,
+        seq: m.seq,
         role: m.role,
         ...(m.tool_name !== undefined ? { tool_name: m.tool_name } : {}),
         ...(timestamp !== undefined ? { timestamp } : {}),
@@ -397,6 +420,7 @@ export class SearchService {
     const index = await open({
       deployment: this.options.deployment,
       events: this.options.settings.events,
+      ...(this.options.settings.maxChars ? { max_chars: this.options.settings.maxChars } : {}),
       ...(this.options.scope !== undefined ? { scope: this.options.scope } : {}),
       ...(this.options.feed ? { feed: true } : {}),
     });
@@ -404,6 +428,7 @@ export class SearchService {
       store: this.options.store,
       index,
       events: this.options.settings.events,
+      ...(this.options.settings.maxChars ? { maxChars: this.options.settings.maxChars } : {}),
       ...(this.options.now ? { now: this.options.now } : {}),
       ...(this.options.log ? { log: this.options.log } : {}),
       ...this.options.indexer,
