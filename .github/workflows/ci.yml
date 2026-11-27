@@ -256,6 +256,13 @@ jobs:
         with:
           bun-version-file: .bun-version
       - run: bun install --frozen-lockfile
+      # The -sql build's lance extension (about 90 MB), checked against its pin: from the cache
+      # when the pins have not changed.
+      - if: runner.os == 'Linux'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: node_modules/.cache/seshi-duckdb-extensions
+          key: duckdb-pinned-${{ matrix.target }}-${{ hashFiles('scripts/duckdb-extensions.json') }}
       # A release folder laid out as GitHub serves one: latest/download/<asset>.
       - name: Build this platform's release assets
         run: bun run release:build --target ${{ matrix.target }} --out dist/site/latest/download
