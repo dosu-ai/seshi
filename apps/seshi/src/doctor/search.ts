@@ -7,8 +7,8 @@ import type { CheckResult } from "./types";
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 /** `events` past this, and maintenance outgrows the worker (docs/seshi/lancedb-search.md,
- * "Risks"). */
-export const LANCE_EVENTS_WARN = 20_000_000;
+ * "Risks"): at 10M records `optimize()` took 17 minutes and the scrub failed. */
+export const LANCE_EVENTS_WARN = 10_000_000;
 
 const MINUTE_MS = 60_000;
 
