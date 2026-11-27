@@ -686,7 +686,9 @@ removed one and the one outside the window). Each runs as alice and as an admin 
 the corpus's two checks (on SQLite only a parse error counts against the first: a mutation may
 fail to bind) and to a third: the answer must be the one an admin gets over a reference index
 built from only the sessions the caller sees, so a count, a sum, a `NOT IN` or a window that
-took a hidden row in would differ, and so would an error only a hidden row raises. A fresh seed
+took a hidden row in would differ, and so would an error only a hidden row raises. A path to
+the fixture index's own files is swapped for the reference's, so a statement that reads one
+differs too; a run fails if more than 5% of its runs time out or run short of memory. A fresh seed
 each run (`SESHI_SQL_FUZZ_SEED` repeats one), `SESHI_SQL_FUZZ_COUNT` statements per half (5,000
 on SQLite, about 20 s; 1,000 on DuckDB, about 12 minutes), and every finding with its seed in the
 job's `sql-fuzz-report` artifact. What it found is written down in the corpus, each case with a

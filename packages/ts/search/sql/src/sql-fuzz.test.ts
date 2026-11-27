@@ -11,6 +11,7 @@ import { provideSql, SqlRefused, SqlService, sqlViews } from "@seshi/search";
 import {
   FIXTURE_NOW,
   FUZZ_ENABLED,
+  FUZZ_MAX_SKIPPED,
   type FuzzCallerName,
   type FuzzCheckVerdict,
   type FuzzEngine,
@@ -61,7 +62,9 @@ async function engine(): Promise<FuzzEngine> {
   provideSql(duckdbSql);
   const full = await buildLanceFixture(join(dir, "full"));
   fixtures.push(full);
+  const tables = await full.tables();
   const reference = {} as Record<FuzzCallerName, SqlService>;
+  const referencePaths = {} as Record<FuzzCallerName, [string, string][]>;
   for (const caller of ["member", "admin"] as const) {
     const fixture = await buildLanceFixture(
       join(dir, caller),
@@ -70,8 +73,14 @@ async function engine(): Promise<FuzzEngine> {
     );
     fixtures.push(fixture);
     reference[caller] = await serviceOver(fixture, extensions);
+    const theirs = await fixture.tables();
+    referencePaths[caller] = [
+      [tables.events, theirs.events],
+      [tables.sessions, theirs.sessions],
+      [tables.llm_calls, theirs.llm_calls],
+      [full.uri, fixture.uri],
+    ];
   }
-  const tables = await full.tables();
 
   instance = await DuckDBInstance.create(":memory:", {
     extension_directory: extensions,
@@ -104,6 +113,7 @@ async function engine(): Promise<FuzzEngine> {
     ],
     full: await serviceOver(full, extensions),
     reference,
+    referencePaths,
     checkThenPrepare: async (sql): Promise<FuzzCheckVerdict> => {
       try {
         await checkDuckdb(conn, sql);
@@ -143,5 +153,7 @@ describe.skipIf(!FUZZ_ENABLED)("the sql fuzzer on DuckDB, over a Lance index", (
     const summary = await fuzzSql(fuzzEngine, { ...options, log: console.log });
     reportFuzz("duckdb", options, summary);
     expect(unexplainedFindings(summary.findings)).toEqual([]);
+    // Each statement runs as two callers.
+    expect(summary.skipped / (summary.statements * 2)).toBeLessThanOrEqual(FUZZ_MAX_SKIPPED);
   }, 3_600_000);
 });

@@ -20,7 +20,13 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { SqlDialect, SqlResult } from "@seshi/model";
-import { DECOY_MARKER, type FixtureSession, SECRET_MARKER, visiblePairs } from "./fixture";
+import {
+  DECOY_MARKER,
+  FIXTURE_SESSIONS,
+  type FixtureSession,
+  SECRET_MARKER,
+  visiblePairs,
+} from "./fixture";
 import { HOSTILE_ADMIN, HOSTILE_ALICE, hostileCases } from "./hostile";
 import { type SqlCaller, SqlFailed, type SqlService, sqlWindow } from "./service";
 
@@ -153,7 +159,7 @@ function renameView(r: Rand, view: string, dialect: SqlDialect): string {
   return pick(r, forms);
 }
 
-/** Replace one occurrence (the `which`th) of a view's name. */
+/** Replace one occurrence of a view's name, picked at random. */
 function replaceView(sql: string, r: Rand, by: (view: string) => string): string | undefined {
   const matches = [...sql.matchAll(VIEW_RE)];
   if (matches.length === 0) return undefined;
@@ -448,10 +454,18 @@ function rowBag(result: SqlResult): string[] {
   return result.rows.map(normalRow).sort();
 }
 
-/** Statements whose answer the reference need not repeat: sampled, random, or cut by a
- * `LIMIT` that may keep other rows of a tie. */
+/** Statements whose answer the reference need not repeat: sampled, random, or aggregated in an
+ * order nothing fixes. */
 const NONDETERMINISTIC =
-  /\b(limit|sample|tablesample|random|randomblob|uuid|gen_random_uuid|setseed|current_timestamp|now|any_value|arbitrary|first|last|string_agg|group_concat|list|array_agg|json_group_array|rowid|_rowid|offset)\b/i;
+  /\b(?:(?:random|randomblob|uuid|gen_random_uuid|setseed|any_value|arbitrary|first|last|string_agg|group_concat|list|array_agg|json_group_array)\s*\(|(?:using\s+sample|tablesample|_?rowid)\b)/i;
+/** A `LIMIT` or `OFFSET` with no `ORDER BY` may keep other rows of the same answer: only the
+ * number of rows is compared. */
+const CUT = /\b(?:limit|offset)\b/i;
+const ORDERED = /\border\s+by\b/i;
+
+/** Every session the fixture holds, as `owner/archive_id`: a pair outside it is not a session's
+ * key (two aggregates, say), so says nothing of scope. */
+const FIXTURE_PAIRS = new Set(FIXTURE_SESSIONS.map((s) => `${s.owner}/${s.archive}`));
 
 export type FuzzFindingKind =
   /** A decoy's marker, or the other member's private text, in an answer. */
@@ -486,6 +500,10 @@ export interface FuzzEngine {
   /** The fixture index, and the reference indexes holding only what each caller sees. */
   full: SqlService;
   reference: Readonly<Record<FuzzCallerName, SqlService>>;
+  /** Each of the fixture index's own files in `paths`, with the reference index's file in its
+   * place: the reference runs the statement with these swapped, so a statement that reads the
+   * file answers otherwise there. */
+  referencePaths: Readonly<Record<FuzzCallerName, readonly (readonly [string, string])[]>>;
   /** The engine's statement check, then a `prepare` of what it accepted. */
   checkThenPrepare(sql: string): Promise<FuzzCheckVerdict>;
   /** The fixture's "now", which the default window ends at. */
@@ -501,6 +519,9 @@ export interface FuzzOptions {
 
 export interface FuzzSummary {
   statements: number;
+  /** Runs whose comparison was skipped for a resource outcome (timeout, memory, a lost or busy
+   * worker): too many and the run proves little. */
+  skipped: number;
   /** Outcome classes over the fixture index, by caller: how much of what was made ran. */
   classes: Record<string, number>;
   findings: FuzzFinding[];
@@ -519,7 +540,7 @@ async function judge(
   base: FuzzBase,
   classes: Record<string, number>,
   findings: FuzzFinding[],
-): Promise<void> {
+): Promise<"skipped" | undefined> {
   const caller = FUZZ_CALLERS[callerName];
   const found = (kind: FuzzFindingKind, detail: string) =>
     findings.push({ ...base, ...m, caller: callerName, kind, detail });
@@ -543,18 +564,23 @@ async function judge(
         sqlWindow({ since: null, until: null }, engine.now),
       );
       const out = result.rows
+        .filter((row) => row[owner] != null && row[archive] != null)
         .map((row) => `${row[owner]}/${row[archive]}`)
-        .filter((pair) => pair !== "null/null" && !visible.has(pair));
+        .filter((pair) => FIXTURE_PAIRS.has(pair) && !visible.has(pair));
       if (out.length > 0) found("pair", `out of scope: ${[...new Set(out)].join(", ")}`);
     }
   }
 
   // Refused and unparsed statements answer the same anywhere; only what ran is compared.
   if (cls === "refused" || cls === "bind") return;
-  const reference = await runFuzz(engine.reference[callerName], HOSTILE_ADMIN, m.sql);
+  // Longest first: a table's path holds its index's.
+  const swaps = [...engine.referencePaths[callerName]].sort((x, y) => y[0].length - x[0].length);
+  const swap = (text: string, [from, to]: readonly [string, string]) => text.replaceAll(from, to);
+  const refSql = swaps.reduce(swap, m.sql);
+  const reference = await runFuzz(engine.reference[callerName], HOSTILE_ADMIN, refSql);
   const refCls = outcomeClass(reference);
   const resource = new Set(["timeout", "memory", "internal", "SqlBusy"]);
-  if (resource.has(cls) || resource.has(refCls)) return;
+  if (resource.has(cls) || resource.has(refCls)) return "skipped";
   if (cls !== refCls) {
     found(
       "outcome",
@@ -565,8 +591,17 @@ async function judge(
   if (!("result" in full) || !("result" in reference)) return;
   if (full.result.truncated || reference.result.truncated) return;
   if (NONDETERMINISTIC.test(m.sql)) return;
+  if (CUT.test(m.sql) && !ORDERED.test(m.sql)) {
+    const [got, want] = [full.result.rows.length, reference.result.rows.length];
+    if (got !== want) found("rows", `${got} rows, the reference ${want} (cut by LIMIT)`);
+    return;
+  }
   const got = rowBag(full.result);
-  const want = rowBag(reference.result);
+  // A path the reference answers with reads as the fixture's.
+  const back = swaps.map(([from, to]) => [to, from] as const);
+  const want = rowBag(reference.result)
+    .map((row) => back.reduce(swap, row))
+    .sort();
   if (json(got) !== json(want)) {
     const extra = got.filter((row) => !want.includes(row)).slice(0, 5);
     const missing = want.filter((row) => !got.includes(row)).slice(0, 5);
@@ -588,6 +623,7 @@ export async function fuzzSql(engine: FuzzEngine, options: FuzzOptions): Promise
   const findings: FuzzFinding[] = [];
   const classes: Record<string, number> = {};
   const total = options.count * 2;
+  let skipped = 0;
   for (let i = 0; i < total; i += FUZZ_PARALLEL) {
     // Made in order, so a seed makes the same statements; run FUZZ_PARALLEL at a time, each as
     // both callers at once (a pool takes two queries per caller).
@@ -605,18 +641,19 @@ export async function fuzzSql(engine: FuzzEngine, options: FuzzOptions): Promise
         findings.push({ ...base, ...m, caller: "admin", kind: "parse", detail: verdict.parse });
       }
     }
-    await Promise.all(
+    const judged = await Promise.all(
       batch.flatMap(({ m, base }) =>
         (["member", "admin"] as const).map((caller) =>
           judge(engine, m, caller, base, classes, findings),
         ),
       ),
     );
+    skipped += judged.filter((j) => j === "skipped").length;
     if (options.log && Math.floor((i + batch.length) / 500) > Math.floor(i / 500)) {
       options.log(`${engine.dialect}: ${i + batch.length} statements, ${findings.length} findings`);
     }
   }
-  return { statements: total, classes, findings };
+  return { statements: total, skipped, classes, findings };
 }
 
 /** Read `SESHI_SQL_FUZZ_SEED` and `SESHI_SQL_FUZZ_COUNT` (statements per stream; a fresh seed
@@ -631,20 +668,26 @@ export function fuzzOptionsFromEnv(
       : Math.floor(Math.random() * 2 ** 31),
     count: env.SESHI_SQL_FUZZ_COUNT ? Number(env.SESHI_SQL_FUZZ_COUNT) : count,
   };
-  if (
-    !Number.isSafeInteger(options.seed) ||
-    !Number.isSafeInteger(options.count) ||
-    options.count < 0
-  ) {
-    throw new Error("SESHI_SQL_FUZZ_SEED and SESHI_SQL_FUZZ_COUNT are whole numbers");
+  // The PRNG takes 32 bits: a larger seed would make another seed's statements.
+  if (!Number.isInteger(options.seed) || options.seed < 0 || options.seed >= 2 ** 32) {
+    throw new Error("SESHI_SQL_FUZZ_SEED is a whole number from 0 to 4294967295");
+  }
+  if (!Number.isSafeInteger(options.count) || options.count < 0) {
+    throw new Error("SESHI_SQL_FUZZ_COUNT is a whole number");
   }
   return options;
 }
+
+/** The share of runs a resource outcome may skip before a run counts as having proved little. */
+export const FUZZ_MAX_SKIPPED = 0.05;
 
 /** Whether `bun run test:sql-fuzz` asked for the fuzzer: it never runs in `bun run test`. */
 export const FUZZ_ENABLED = process.env.SESHI_SQL_FUZZ === "1";
 
 const COMMENT = "(?:/\\*[\\s\\S]*?\\*/|--[^\\n]*\\n)";
+/** Where SQLite stops when it took WINDOW, OVER or FILTER for an identifier: at the window's
+ * name or its parenthesis. */
+const LOOKAHEAD = /^near "(?:\w+|\()": syntax error$/;
 /** Words in order with only whitespace and comments between them, any case. */
 const gapped = (...words: string[]) => new RegExp(words.join(`(?:\\s|${COMMENT})*`), "i");
 
@@ -674,18 +717,46 @@ export const FUZZ_KNOWN: readonly KnownFinding[] = [
     pinned: "errors-8",
   },
   // The check's parser takes what SQLite cannot parse: refused by SQLite, the safe way round.
-  { kind: "parse", engine: "sqlite", sql: gapped("\\bGROUP", "BY", "ALL\\b"), pinned: "errors-6" },
-  { kind: "parse", engine: "sqlite", sql: /\w\([^()]*\)\.\w/, pinned: "errors-9" },
+  {
+    kind: "parse",
+    engine: "sqlite",
+    sql: gapped("\\bGROUP", "BY", "ALL\\b"),
+    detail: /^near "ALL": syntax error$/,
+    pinned: "errors-6",
+  },
+  {
+    kind: "parse",
+    engine: "sqlite",
+    sql: /\b[a-z_]\w*\([^()]*\)\.[a-z_]\w*/i,
+    detail: /^near "\.": syntax error$/,
+    pinned: "errors-9",
+  },
   // A comment where some SQLite builds (macOS's system one) look ahead to tell WINDOW, OVER and
   // FILTER from identifiers.
   {
     kind: "parse",
     engine: "sqlite",
-    sql: gapped("\\bWINDOW\\s+\\w+", COMMENT),
+    sql: new RegExp(
+      `${gapped("\\bWINDOW", COMMENT).source}|${gapped("\\bWINDOW\\s+\\w+", COMMENT).source}`,
+      "i",
+    ),
+    detail: LOOKAHEAD,
     pinned: "lexing-15",
   },
-  { kind: "parse", engine: "sqlite", sql: gapped("\\bFILTER", COMMENT), pinned: "lexing-16" },
-  { kind: "parse", engine: "sqlite", sql: gapped("\\bOVER", COMMENT), pinned: "lexing-17" },
+  {
+    kind: "parse",
+    engine: "sqlite",
+    sql: gapped("\\bFILTER", COMMENT),
+    detail: LOOKAHEAD,
+    pinned: "lexing-16",
+  },
+  {
+    kind: "parse",
+    engine: "sqlite",
+    sql: gapped("\\bOVER", COMMENT),
+    detail: LOOKAHEAD,
+    pinned: "lexing-17",
+  },
 ];
 
 /** The findings no known one explains: what fails the run. */
@@ -714,7 +785,7 @@ export function reportFuzz(
   for (const f of summary.findings) byKind[f.kind] = (byKind[f.kind] ?? 0) + 1;
   const known = summary.findings.length - unexplainedFindings(summary.findings).length;
   console.log(
-    `sql fuzz on ${dialect}: seed ${options.seed}, ${summary.statements} statements; outcomes ${json(summary.classes)}; findings ${json(byKind)} (${known} known)`,
+    `sql fuzz on ${dialect}: seed ${options.seed}, ${summary.statements} statements, ${summary.skipped} runs skipped for resources; outcomes ${json(summary.classes)}; findings ${json(byKind)} (${known} known)`,
   );
   const folder = process.env.SESHI_SQL_FUZZ_REPORT;
   if (folder) {
@@ -725,7 +796,7 @@ export function reportFuzz(
     );
     writeFileSync(
       join(folder, `sql-fuzz-${dialect}.summary.json`),
-      `${JSON.stringify({ ...options, statements: summary.statements, outcomes: summary.classes, findings: byKind, known }, null, 2)}\n`,
+      `${JSON.stringify({ ...options, statements: summary.statements, skipped: summary.skipped, outcomes: summary.classes, findings: byKind, known }, null, 2)}\n`,
     );
   }
 }

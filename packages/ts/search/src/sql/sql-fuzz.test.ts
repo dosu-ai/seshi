@@ -12,6 +12,7 @@ import { checkSqlite, SqlRefused } from "./check-sqlite";
 import { buildFixture, FIXTURE_NOW } from "./fixture";
 import {
   FUZZ_ENABLED,
+  FUZZ_MAX_SKIPPED,
   type FuzzCallerName,
   type FuzzCheckVerdict,
   type FuzzEngine,
@@ -55,10 +56,11 @@ async function engine(): Promise<FuzzEngine> {
   dir = mkdtempSync(join(tmpdir(), "seshi-sql-fuzz-"));
   const full = await buildFixture(join(dir, "full"));
   const reference = {} as Record<FuzzCallerName, SqlService>;
+  const referencePaths = {} as Record<FuzzCallerName, [string, string][]>;
   for (const caller of ["member", "admin"] as const) {
-    reference[caller] = serviceOver(
-      await buildFixture(join(dir, caller), fuzzReferenceSessions(caller, FIXTURE_NOW)),
-    );
+    const path = await buildFixture(join(dir, caller), fuzzReferenceSessions(caller, FIXTURE_NOW));
+    reference[caller] = serviceOver(path);
+    referencePaths[caller] = [[full, path]];
   }
   const handle = new Database(full, { readonly: true });
   db = handle;
@@ -79,6 +81,7 @@ async function engine(): Promise<FuzzEngine> {
     ],
     full: serviceOver(full),
     reference,
+    referencePaths,
     checkThenPrepare: async (sql): Promise<FuzzCheckVerdict> => {
       let body: string;
       try {
@@ -118,5 +121,7 @@ describe.skipIf(!FUZZ_ENABLED)("the sql fuzzer on SQLite", () => {
     const summary = await fuzzSql(fuzzEngine, { ...options, log: console.log });
     reportFuzz("sqlite", options, summary);
     expect(unexplainedFindings(summary.findings)).toEqual([]);
+    // Each statement runs as two callers.
+    expect(summary.skipped / (summary.statements * 2)).toBeLessThanOrEqual(FUZZ_MAX_SKIPPED);
   }, 3_600_000);
 });

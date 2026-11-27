@@ -443,7 +443,9 @@ jobs:
   sql-fuzz:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # About 12 minutes for DuckDB's 2,000 statements on a laptop; a runner may take three times
+    # that. Lower the DuckDB count in its test if a run comes near the limit.
+    timeout-minutes: 75
     permissions:
       contents: read
     steps:

@@ -38,6 +38,8 @@ export interface HostileCase extends Outcome {
   until?: string;
   /** Where DuckDB answers otherwise than SQLite (a parser that reads `[a]` as a list, say). */
   duckdb?: Partial<Outcome>;
+  /** `either`: whether the statement prepares depends on the SQLite build (lexing-15). */
+  prepare?: "either";
   /** Why a case expects what it does, where that is a known weakness written down rather than
    * fixed (a finding of the fuzzer, say). */
   why?: string;
