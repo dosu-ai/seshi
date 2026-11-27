@@ -3,10 +3,10 @@ import { BucketHttpError } from "./http-error";
 
 export interface ObjectStat {
   size: number;
-  /** The object's ETag, unquoted, as the backend reports it. For a single-part PUT on S3, R2
-   * and MinIO this is the MD5 of the body in hex, and the folder store uses the same MD5, which
-   * `publish` uses to verify without reading the object back. Absent only when a backend
-   * reports none. */
+  /** The object's ETag, unquoted, as the backend reports it. For a single-part PUT on S3 (unless
+   * the object is encrypted with SSE-KMS or SSE-C), R2 and MinIO this is the MD5 of the body in
+   * hex, and the folder store uses the same MD5: when it matches, `publish` verifies without
+   * reading the object back. Absent only when a backend reports none. */
   etag?: string;
   /** When the object was last written, ISO 8601 (S3's `Last-Modified`, the file's mtime).
    * Absent when the backend does not say. */

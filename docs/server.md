@@ -74,7 +74,7 @@ The settings most servers need ([config.md](config.md) has all of them):
 | `auth.oidc.*`, `auth.session_keys.*` | `SESHI_AUTH__OIDC__ISSUER`, `…__CLIENT_ID`, `SESHI_AUTH__SESSION_KEYS__K1` | Sign-in through your IdP (X5.2) and the key session tokens are signed with (32+ characters) |
 | `auth.org_key.enabled` | `SESHI_AUTH__ORG_KEY__ENABLED` | Default `true`: members holding the org key write as the username they state (X5.12) |
 | `store.url` | `SESHI_STORE__URL` | Required: `r2://bucket/prefix`, `s3://bucket/prefix`, `az://container/prefix` (Azure Blob Storage), `gs://bucket/prefix` (Google Cloud Storage), or `file:///path` |
-| `store.credentials.*`, `store.region`, `store.endpoint`, `store.account_id`, `store.account_name` | `SESHI_STORE__CREDENTIALS__ACCESS_KEY_ID`, `SESHI_STORE__ACCOUNT_NAME`, … | The bucket's keys and where it is. Unset, the standard `AWS_*` / `S3_*` (and `R2_*` for `r2://`) variables apply; for `az://`, `AZURE_STORAGE_*`, then workload identity ([config.md](config.md#azure-blob-storage-az)); for `gs://`, Application Default Credentials ([config.md](config.md#google-cloud-storage-gs)) |
+| `store.credentials.*`, `store.region`, `store.endpoint`, `store.account_id`, `store.account_name` | `SESHI_STORE__CREDENTIALS__ACCESS_KEY_ID`, `SESHI_STORE__ACCOUNT_NAME`, … | The bucket's keys and where it is. Unset, the standard `AWS_*` / `S3_*` (and `R2_*` for `r2://`) variables apply, then for `s3://` an ECS task's or EC2 instance's role; for `az://`, `AZURE_STORAGE_*`, then workload identity ([config.md](config.md#azure-blob-storage-az)); for `gs://`, Application Default Credentials ([config.md](config.md#google-cloud-storage-gs)) |
 | `redaction.packs` | `SESHI_REDACTION__PACKS` | Your own redaction rule packs (TOML, or today's JSON rule files), on top of the built-in pack ([redaction.md](redaction.md)). The server refuses to start on a pack it cannot use or a rule that fails its own test strings |
 | `store.deployment_id`, `store.org` | `SESHI_STORE__DEPLOYMENT_ID`, `SESHI_STORE__ORG` | Recorded in the bucket's layout marker (`seshi.json`); the server refuses to start against a bucket marked for another deployment or org (X1.4). See [the layout](../spec/layout.md) |
 | `server.listen` | `SESHI_SERVER__LISTEN` | Default `:7200`; flag `--listen` |
@@ -220,7 +220,7 @@ Each cloud's own object storage holds the bucket:
 
 | Cloud | `store.url` | Keys |
 |---|---|---|
-| AWS | `s3://bucket/prefix` with `store.region` | An IAM role for the pod or instance through the `AWS_*` variables, or `store.credentials` |
+| AWS | `s3://bucket/prefix` with `store.region` | The ECS task role (Fargate or EC2), EKS Pod Identity, or the EC2 instance profile: seshi asks for the role's keys itself and renews them ([config.md](config.md#amazon-s3-s3)). Or `store.credentials`, or the `AWS_*` variables |
 | Google Cloud | `gs://bucket/prefix` | GKE Workload Identity: the pod's Kubernetes service account bound to a Google service account with **Storage Object User** on the bucket (seshi asks the metadata server for its token), or `store.credentials.service_account_key`, or `GOOGLE_APPLICATION_CREDENTIALS` |
 | Azure | `az://container/prefix` with `store.account_name` | Workload identity on AKS (`AZURE_FEDERATED_TOKEN_FILE`, `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, set by AKS for a service account that names a managed identity with **Storage Blob Data Contributor** on the container), or `store.credentials.account_key` / `sas_token` |
 

@@ -66,10 +66,11 @@ source's checkpoint, so an unchanged object is never read again (F6.2).
   prefix; when keys sort by time, `ordered_keys = true` lists only after the key before the
   newest one (which stays watched while it grows).
 - **Credentials.** The poller needs `s3:ListBucket` on the prefix and `s3:GetObject`, nothing
-  else; with `role` the given keys (or the `AWS_*` environment) need `sts:AssumeRole` on that
-  role, and the role's keys are renewed before they expire. `role` applies to `s3://`. Without
-  `credentials` the poller reads the standard `AWS_*` / `S3_*` (`R2_*` for `r2://`) variables,
-  like the bucket client. An `az://` source takes `account_name`, `endpoint` and
+  else; with `role` the given keys (or the `AWS_*` environment, or the role seshi runs as) need
+  `sts:AssumeRole` on that role, and the role's keys are renewed before they expire. `role`
+  applies to `s3://`. Without `credentials` the poller reads the standard `AWS_*` / `S3_*`
+  (`R2_*` for `r2://`) variables, then, for `s3://`, the ECS task's or EC2 instance's role,
+  like the bucket client ([config.md](config.md#amazon-s3-s3)). An `az://` source takes `account_name`, `endpoint` and
   `credentials.account_key` or `sas_token` (read and list are enough), else the
   `AZURE_STORAGE_*` variables or workload identity, as [`[store]`](config.md#azure-blob-storage-az)
   does. A `gs://` source takes `credentials.service_account_key`, else Application Default
