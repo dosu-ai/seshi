@@ -532,10 +532,15 @@ describe("the server honours it", () => {
         .status,
     ).toBe(200);
     expect((await call("GET", `${events}?event=1&offset=2`)).status).toBe(200);
-    expect(
-      (await call("GET", `${events}?trace=${content_hash.slice(0, 8)}&around=1&context=1`)).status,
-    ).toBe(200);
-    for (const bad of ["from=x", "bogus=1", "from=1&around=2", "mode=short", "max_chars=10"]) {
+    expect((await call("GET", `${events}?around=1&context=1`)).status).toBe(200);
+    for (const bad of [
+      "from=x",
+      "bogus=1",
+      "trace=1a2b3c4d",
+      "from=1&around=2",
+      "mode=short",
+      "max_chars=10",
+    ]) {
       expect((await call("GET", `${events}?${bad}`)).status, bad).toBe(400);
     }
     expect((await call("GET", `${events}?head=${"0".repeat(64)}`)).status).toBe(409);

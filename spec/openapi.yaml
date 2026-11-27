@@ -261,13 +261,6 @@ paths:
           in: query
           description: With `event`, where in its text to start.
           schema: { type: integer, minimum: 0, default: 0 }
-        - name: trace
-          in: query
-          description: |
-            Count `from`, `to`, `around` and `event` from the start of this trace of the
-            session's current chain (a content hash, or its first 8 or more characters): a
-            search match's `content_hash` and `event_index`. The answer gives `seq`s.
-          schema: { type: string, pattern: "^[0-9a-f]{8,64}$" }
         - name: head
           in: query
           description: Refuse with `409 head_changed` when the session's head is no longer this one.
@@ -290,8 +283,7 @@ paths:
         "404":
           description: |
             `not_found`: no such session, or one the caller may not read. `no_trace`: the
-            session has no head, or a trace of its chain is missing. `not_in_chain`: `trace` is
-            not one of the session's current traces (a replace dropped it).
+            session has no head, or a trace of its chain is missing.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -808,13 +800,6 @@ paths:
           in: query
           description: With `event`, where in its text to start.
           schema: { type: integer, minimum: 0, default: 0 }
-        - name: trace
-          in: query
-          description: |
-            Count `from`, `to`, `around` and `event` from the start of this trace of the
-            session's current chain (a content hash, or its first 8 or more characters): a
-            search match's `content_hash` and `event_index`. The answer gives `seq`s.
-          schema: { type: string, pattern: "^[0-9a-f]{8,64}$" }
         - name: head
           in: query
           description: Refuse with `409 head_changed` when the session's head is no longer this one.
@@ -837,8 +822,7 @@ paths:
         "404":
           description: |
             `not_found`: no such session, or one the caller may not read. `no_trace`: the
-            session has no head, or a trace of its chain is missing. `not_in_chain`: `trace` is
-            not one of the session's current traces (a replace dropped it).
+            session has no head, or a trace of its chain is missing.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }

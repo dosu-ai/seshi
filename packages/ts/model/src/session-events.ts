@@ -46,11 +46,6 @@ export interface SessionEventsRequest {
   /** Read one event's text in pieces, from `offset`: an event `max_chars` cut. */
   event?: number;
   offset?: number;
-  /** Count `from`, `to`, `around` and `event` from the start of this trace of the session's
-   * current chain instead of from its first event: a content hash, or its first 8 or more
-   * characters. With a search match's `content_hash` and `event_index`, `around` reads the
-   * events around the match. The answer gives `seq`s. */
-  trace?: string;
   /** Refuse (409 `head_changed`) when the session's head is no longer this: a replace numbered
    * its events again. */
   head?: string;

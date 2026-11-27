@@ -34,7 +34,7 @@ const USAGE = `usage: seshi sessions ls [--owner <id>] [--limit N] [--after <cur
                              [--model <m>] [--label key=value]… [--source <id>]
                              [--since <time|7d>] [--until <time|7d>] [--limit N] [--after <cursor>]
        seshi sessions read <session> [--from N] [--to N] | [--around N [--context N]] | [--event N [--offset N]]
-                           [--hash <trace>] [--full] [--roles user,assistant,…] [--max-chars N] [--head <h>]
+                           [--full] [--roles user,assistant,…] [--max-chars N] [--head <h>]
                            (<session>: <format> <session-id>, format/session-id or owner/archive-id)
        seshi sessions show <format> <session-id> [--owner <id>] [--trace]
        seshi sessions export <format> <session-id> [--format seshi|letta|otlp|atif] [--hash <h>] [-o <file>] [--owner <id>]
@@ -468,7 +468,9 @@ async function read(
       .filter((r) => r !== "") as EventRole[];
   }
   if (values.head !== undefined) request.head = values.head;
-  if (values.hash !== undefined) request.trace = values.hash;
+  if (values.hash !== undefined) {
+    throw new UsageError("--hash is export's: read takes a search match's seq as --around");
+  }
   const events = await backend.sessionEvents(ref, request);
   emit(ctx, json, events, () => eventsLines(events));
   return EXIT.ok;

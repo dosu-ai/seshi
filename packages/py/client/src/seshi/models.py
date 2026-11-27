@@ -1149,9 +1149,6 @@ class SessionEventsRequest(Request):
     event: int | None = None
     """Read this one event's text in pieces, from `offset`."""
     offset: int | None = None
-    trace: str | None = None
-    """Count `from`, `to`, `around` and `event` in this trace of the chain (a content hash, or
-    its first 8 or more characters), as a search match's `content_hash` and `event_index` do."""
     head: str | None = None
     """Refuse (`ServerError` 409 `head_changed`) when the session's head is no longer this."""
 

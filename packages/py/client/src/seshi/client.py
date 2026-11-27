@@ -119,7 +119,6 @@ def _events_request(
     max_chars: int | None,
     event: int | None,
     offset: int | None,
-    trace: str | None,
     head: str | None,
 ) -> m.SessionEventsRequest:
     return m.SessionEventsRequest(
@@ -132,7 +131,6 @@ def _events_request(
         max_chars=max_chars,
         event=event,
         offset=offset,
-        trace=trace,
         head=head,
     )
 
@@ -458,17 +456,15 @@ class SeshiClient(_Base):
         max_chars: int | None = None,
         event: int | None = None,
         offset: int | None = None,
-        trace: str | None = None,
         head: str | None = None,
     ) -> m.SessionEvents:
         """`GET …/events`: part of the session's events, numbered by `seq` across its current
         traces: `[from_, to)`, or `context` events either side of `around`, or one event's text
         in pieces (`event`, `offset`). `mode` is `condensed` (tool results cut to 200
-        characters; the default) or `full`; `roles` keeps only those roles; `trace` counts
-        positions in one trace of the chain (a search match's `content_hash` and
-        `event_index`). Every refusal raises `ServerError`: 404 for a session not stored or not
-        readable, 410 `redacted`, 409 `head_changed` when it is no longer `head`, 400
-        `bad_query`."""
+        characters; the default) or `full`; `roles` keeps only those roles. A search match's
+        `seq` is what `around` takes. Every refusal raises `ServerError`: 404 for a session not
+        stored or not readable, 410 `redacted`, 409 `head_changed` when it is no longer `head`,
+        400 `bad_query`."""
         request = _events_request(
             from_=from_,
             to=to,
@@ -479,7 +475,6 @@ class SeshiClient(_Base):
             max_chars=max_chars,
             event=event,
             offset=offset,
-            trace=trace,
             head=head,
         )
         return self._run(calls.session_events(format, session_id, request, owner))
@@ -498,7 +493,6 @@ class SeshiClient(_Base):
         max_chars: int | None = None,
         event: int | None = None,
         offset: int | None = None,
-        trace: str | None = None,
         head: str | None = None,
     ) -> m.SessionEvents:
         """`session_events` by owner and archive id, as search results and listings name a
@@ -513,7 +507,6 @@ class SeshiClient(_Base):
             max_chars=max_chars,
             event=event,
             offset=offset,
-            trace=trace,
             head=head,
         )
         return self._run(calls.session_events_by_archive(owner, archive_id, request))
@@ -1111,7 +1104,6 @@ class AsyncSeshiClient(_Base):
         max_chars: int | None = None,
         event: int | None = None,
         offset: int | None = None,
-        trace: str | None = None,
         head: str | None = None,
     ) -> m.SessionEvents:
         """`GET …/events` (see `SeshiClient.session_events`)."""
@@ -1125,7 +1117,6 @@ class AsyncSeshiClient(_Base):
             max_chars=max_chars,
             event=event,
             offset=offset,
-            trace=trace,
             head=head,
         )
         return await self._run(calls.session_events(format, session_id, request, owner))
@@ -1144,7 +1135,6 @@ class AsyncSeshiClient(_Base):
         max_chars: int | None = None,
         event: int | None = None,
         offset: int | None = None,
-        trace: str | None = None,
         head: str | None = None,
     ) -> m.SessionEvents:
         """`session_events` by owner and archive id."""
@@ -1158,7 +1148,6 @@ class AsyncSeshiClient(_Base):
             max_chars=max_chars,
             event=event,
             offset=offset,
-            trace=trace,
             head=head,
         )
         return await self._run(calls.session_events_by_archive(owner, archive_id, request))

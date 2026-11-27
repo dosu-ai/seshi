@@ -108,7 +108,6 @@ uploaded in chunks has a trace per chunk); a replace numbers them again, which `
 |---|---|
 | `--from N`, `--to N` | The range `[from, to)` (the whole session by default) |
 | `--around N [--context N]` | `context` events (5, at most 50) either side of one |
-| `--hash <trace>` | Count positions from the start of this trace (its content hash, or 8 or more of its characters): a search match's trace and `event_index` (`--hash 1a2b3c4d --around 13`) |
 | `--full` | Tool results as stored; without it each is cut to its first 200 characters, with how much was left out |
 | `--roles user,assistant,…` | Only events of these roles |
 | `--max-chars N` | Characters of text to give at most (1,000 to 30,000, the default). The read stops at an event boundary and says `next: <seq>`, or cuts an event that does not fit |

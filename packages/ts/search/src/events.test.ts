@@ -209,19 +209,6 @@ describe("read_session's events", () => {
     expect((await read({ from: 9 })).events).toEqual([]);
   });
 
-  it("counts from a trace's start: a search match's hash and index", async () => {
-    const around = await read({ trace: H(3).slice(0, 8), around: 1, context: 0 });
-    expect(around.events.map((e) => [e.seq, e.text])).toEqual([[5, "thinking"]]);
-    expect((await read({ trace: H(3), from: 0, to: 2 })).events.map((e) => e.seq)).toEqual([4, 5]);
-    expect((await read({ trace: H(2), event: 2, offset: 4_990 })).events[0]?.seq).toBe(2);
-    expect(await refusal(read({ trace: H(1), around: 0 }))).toEqual({
-      status: 404,
-      code: "not_in_chain",
-    });
-    expect(await refusal(read({ trace: H(3), around: 3 }))).toMatchObject({ status: 400 });
-    expect(await refusal(read({ trace: "0000" }))).toMatchObject({ status: 400 });
-  });
-
   it("stops at max_chars on an event boundary, or cuts the first event, and says where next", async () => {
     const full = await read({ mode: "full", max_chars: 1_000 });
     // The tool result does not fit in what is left, and too little is left to be worth a piece.

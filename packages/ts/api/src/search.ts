@@ -129,7 +129,7 @@ export function timeOrAge(value: string, name: string, now: Date): string {
 }
 
 const EVENT_NUMBERS = ["from", "to", "around", "context", "max_chars", "event", "offset"];
-const EVENT_KNOWN = new Set([...EVENT_NUMBERS, "mode", "roles", "head", "trace", "owner"]);
+const EVENT_KNOWN = new Set([...EVENT_NUMBERS, "mode", "roles", "head", "owner"]);
 
 /** `GET …/events`' query: `roles` is comma-separated, or repeated. */
 export function eventsRequestOf(url: URL): SessionEventsRequest {
@@ -159,9 +159,7 @@ export function eventsRequestOf(url: URL): SessionEventsRequest {
     .map((r) => r.trim())
     .filter((r) => r !== "");
   if (roles.length > 0) request.roles = roles;
-  for (const name of ["head", "trace"]) {
-    const value = params.get(name);
-    if (value !== null && value !== "") request[name] = value;
-  }
+  const head = params.get("head");
+  if (head !== null && head !== "") request.head = head;
   return request as SessionEventsRequest;
 }
