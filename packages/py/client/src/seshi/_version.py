@@ -1,3 +1,3 @@
 """The release this client was built with: packages/ts/model/package.json's version."""
 
-__version__ = "0.30.2"
+__version__ = "0.31.0"

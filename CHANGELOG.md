@@ -1,3 +1,16 @@
+# [0.31.0](https://github.com/dosu-ai/seshi/compare/v0.30.2...v0.31.0) (2026-11-27)
+
+
+### Features
+
+* **mcp:** sql in seshi mcp, described from the server's schema ([#94](https://github.com/dosu-ai/seshi/issues/94)) ([57d7996](https://github.com/dosu-ai/seshi/commit/57d79964b3a153fa0c816f23456a132c66419297))
+* **search:** index every event, with seq, a role filter and model calls ([#85](https://github.com/dosu-ai/seshi/issues/85)) ([dd34ff5](https://github.com/dosu-ai/seshi/commit/dd34ff5df4688d048a08b16b7171d0ebff813423))
+* **search:** list_sessions, read_session and seshi mcp ([#83](https://github.com/dosu-ai/seshi/issues/83)) ([f5ec6fd](https://github.com/dosu-ai/seshi/commit/f5ec6fd075cd65bbd3d31f4cee5497f851204e2d))
+* **search:** report the server's sql workers, and answer a laptop's just-uploaded sessions ([#98](https://github.com/dosu-ai/seshi/issues/98)) ([872a754](https://github.com/dosu-ai/seshi/commit/872a754dc74f223da1c5e30436548e879f6568f5))
+* **search:** ship sql on LanceDB as the -sql server build and image ([#93](https://github.com/dosu-ai/seshi/issues/93)) ([a9d4b79](https://github.com/dosu-ai/seshi/commit/a9d4b793c18bd811602ec2fe65d223e383126890))
+* **search:** sql on a LanceDB index ([#89](https://github.com/dosu-ai/seshi/issues/89)) ([9a6fe20](https://github.com/dosu-ai/seshi/commit/9a6fe20276a0ab4457caeca286b63fb8ba4da43b))
+* **search:** sql on a SQLite index ([#86](https://github.com/dosu-ai/seshi/issues/86)) ([6940844](https://github.com/dosu-ai/seshi/commit/6940844d74d21065e0b9573a99efa5ecf3857d8f))
+
 ## [0.30.2](https://github.com/dosu-ai/seshi/compare/v0.30.1...v0.30.2) (2026-11-27)
 
 
