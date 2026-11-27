@@ -380,7 +380,9 @@ export class ServerlessBackend implements Backend {
     );
     return records as ReviewDecision[];
   }
-  /** The laptop's own index, caught up unless it caught up within two indexer intervals. */
+  /** The laptop's own index, caught up unless it caught up within two indexer intervals and
+   * this owner's feed holds nothing it has not read: a session the uploader wrote a moment
+   * ago is answered at once, and a call with nothing new costs one listing of that feed. */
   private async index(hooks: SearchHooks): Promise<SearchService> {
     const search = this.instance.search;
     if (!search) {
@@ -396,7 +398,9 @@ export class ServerlessBackend implements Backend {
     const fresh =
       caughtUp !== undefined &&
       Date.now() - Date.parse(caughtUp) < 2 * this.instance.config.search.interval;
-    if (!fresh) await this.refused(() => search.catchUp());
+    if (!fresh || (await this.refused(() => search.behind(this.owner)))) {
+      await this.refused(() => search.catchUp());
+    }
     return search;
   }
   async search(request: SearchRequest, hooks: SearchHooks = {}): Promise<SearchResults> {

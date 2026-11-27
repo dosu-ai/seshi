@@ -123,7 +123,8 @@ Where the config and bucket keys are:
 
 - `seshi workers status [--json]`: the worker (`running`, `stopped`, `never`, or `several`),
   each job's last run (and what it did, such as the sweep's `deleted`), last error and backlog,
-  and each source's drop and failure counts.
+  and each source's drop and failure counts; with `--server`, also the sql workers of the api
+  process that answered (started, busy, queued and restarted; none before its first statement).
   Exit 8 when something needs a look. `GET /v1/admin/jobs` answers the same for admins.
 - `seshi sync run <id>`, `sync assemble`, `sync prune`, `sync status [<id>]`,
   `sync failed <id>`, `sync dropped <id>`: poll once; publish the span sessions that went

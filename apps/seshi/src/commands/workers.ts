@@ -4,6 +4,7 @@ import { EXIT } from "../cli/exit";
 import { failWith } from "../cli/failures";
 import { emit, fail, helpOrUsageError, takeJson } from "../cli/output";
 import { printable, type Role, Style, styleFor } from "../cli/style";
+import { serverPoolText } from "../doctor/pool";
 import { adminTarget } from "./admin-target";
 import type { CommandContext } from "./index";
 import { openServer, SERVER_OPTIONS, serverFailure } from "./server-instance";
@@ -80,6 +81,10 @@ export function statusLines(status: InstanceStatus, style: Style = Style.plain()
     lines.push(
       `  ${source.id.padEnd(24)} ${source.type}, ${state}${checkpoint}, ${source.dropped} dropped, ${source.failed} failed${counts(source.health as Record<string, number>)}`,
     );
+  }
+  // Only a process that answers sql reports its workers: the server that took the request.
+  if (status.sql !== undefined) {
+    lines.push("", `sql workers (${status.instance.process}): ${serverPoolText(status.sql)}`);
   }
   if (status.warnings.length > 0) {
     lines.push("");

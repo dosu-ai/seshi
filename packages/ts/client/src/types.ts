@@ -149,7 +149,19 @@ export interface JobsStatus {
   worker: { state: "running" | "stopped" | "never" | "several"; [key: string]: unknown };
   jobs: Array<{ name: string; kind: string; [key: string]: unknown }>;
   sources: SourceStatus[];
+  /** The answering process's sql workers; null before its first statement, absent when it
+   * does not answer sql. */
+  sql?: SqlPoolStatus | null;
   warnings: string[];
+}
+
+/** A server process's sql workers (`JobsStatus.sql`). */
+export interface SqlPoolStatus {
+  workers: number;
+  busy: number;
+  queued: number;
+  /** Workers killed by the watchdog or that exited, since the pool started. */
+  restarts: number;
 }
 
 /** One config reload (`POST /v1/admin/reload`); `spec/openapi.yaml`'s `ReloadReport`. */

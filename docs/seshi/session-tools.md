@@ -350,7 +350,9 @@ API's does not.
 - **The watchdog** in the parent kills a worker (SIGKILL) that has not answered by its
   deadline, or whose resident memory passes `[search.sql] worker_memory` (polled every 250 ms),
   answers that query with `timeout` or `memory`, and starts a new worker. A worker that exits
-  is restarted with backoff; `seshi doctor` and `seshi search --status` report the pool.
+  is restarted with backoff. `GET /v1/admin/jobs` reports the answering process's pool, which
+  `seshi workers status --server` prints, and `seshi doctor --config` and `seshi search --status`
+  ask a running server for with `--server <url>`.
 
 **A DuckDB query** (LanceDB). The worker:
 

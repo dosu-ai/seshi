@@ -366,6 +366,26 @@ export class Indexer {
     }
   }
 
+  /** Whether `owner`'s feed holds an entry the index has not read: its feed listed from the
+   * cursor (less the lag window), as a pass would list it. A reader that caught up a moment
+   * ago asks this before answering, so a session uploaded since is not missing for the
+   * indexer interval; it costs one listing, where a pass lists every owner's feed. */
+  async behind(owner: string): Promise<boolean> {
+    const generation = await this.index.generation();
+    const prefix = keys.changes(owner);
+    const held = (await this.index.cursors(generation, [owner])).get(owner);
+    let startAfter = held === undefined ? undefined : this.windowStart(prefix, held);
+    for (;;) {
+      const page = await this.store.list(prefix, { startAfter, limit: this.pageSize });
+      const listed = page.keys.filter((k) => parseChangeKey(k.slice(prefix.length)) !== null);
+      const seen = await this.index.seen(generation, owner, listed);
+      if (listed.some((k) => !seen.has(k))) return true;
+      const last = page.keys.at(-1);
+      if (!page.truncated || last === undefined) return false;
+      startAfter = last;
+    }
+  }
+
   forgetOwners(): void {
     this.owners = undefined;
   }

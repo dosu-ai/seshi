@@ -413,8 +413,10 @@ holds (`scope`): `"mine"` (only your sessions; the one scope a key that reads on
 folder can use), `"visible"` (the default: yours and every `org` session) or `"all"` (owner-only
 sessions too, as `--include-private` on every search).
 
-The daemon catches the index up every `search.interval`. `seshi search` uses the index as it is
-when it caught up within twice that interval, catches up first otherwise, and says
+The daemon catches the index up every `search.interval`. `seshi search` (and `seshi sql`) uses
+the index as it is when it caught up within twice that interval and its owner's change
+feed holds nothing it has not read (one listing, so a session uploaded a moment ago is found at
+once), catches up first otherwise, and says
 `Index caught up <time>.` The index records the scope and owner it was built for; when either
 changes, it is emptied and built again, so it never holds sessions the new scope leaves out.
 A result whose session the key may not read is left out. With search off, `seshi search` exits 3

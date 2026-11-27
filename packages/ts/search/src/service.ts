@@ -23,6 +23,7 @@ import type {
   IndexedSession,
   IndexStore,
   OpenIndex,
+  ScrubFailure,
   SessionListQuery,
   SessionPosition,
 } from "./backend";
@@ -111,6 +112,8 @@ export interface SearchStatus {
   stale_schema?: string;
   /** Requests waiting for the worker's next pass, with when each was made. */
   requested?: { rebuild?: string; scrub?: string };
+  /** The last scrub failed: deleted text is still in the bucket until one finishes. */
+  scrub_failed?: ScrubFailure;
 }
 
 /** A rebuild of a shared index, asked for: the worker starts it on its next pass, builds the
@@ -470,6 +473,11 @@ export class SearchService {
     return (await this.open()).indexer.catchUp(signal);
   }
 
+  /** Whether `owner`'s change feed holds an entry this index has not read (one listing). */
+  async behind(owner: string): Promise<boolean> {
+    return (await this.open()).indexer.behind(owner);
+  }
+
   /** Drop everything the index holds and build it again from the change feed (F10.2). Until
    * it has caught up, queries here and in any process sharing the file are refused. Not for a
    * shared index: see `startRebuild()`. */
@@ -521,6 +529,7 @@ export class SearchService {
         ...(state.building ? { building: state.building } : {}),
         ...(state.stale_schema ? { stale_schema: state.stale_schema } : {}),
         ...(state.requested ? { requested: state.requested } : {}),
+        ...(state.scrub_failed ? { scrub_failed: state.scrub_failed } : {}),
       };
     });
   }
