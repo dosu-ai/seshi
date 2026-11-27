@@ -39,6 +39,7 @@ import {
   type SessionListPage,
   type SessionListQuery,
   type SessionUpdate,
+  type SqlTables,
 } from "@seshi/search";
 import { changeStamp } from "@seshi/store";
 import {
@@ -825,6 +826,15 @@ export class LanceIndex implements IndexStore {
           }
         : {}),
     };
+  }
+
+  async sqlTables(): Promise<SqlTables | undefined> {
+    const meta = await this.reading(() => this.meta());
+    const gen = this.live(meta);
+    if (gen === undefined || !this.servable(meta, gen)) return undefined;
+    const at = (kind: Kind) =>
+      under(under(this.options.uri, gen), `${this.tableName(meta, gen, kind)}.lance`);
+    return { sessions: at("sessions"), events: at("events"), llm_calls: at("llm_calls") };
   }
 
   /** A generation this code can read: written under its schema. */

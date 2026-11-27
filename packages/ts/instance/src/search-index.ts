@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import {
   type BucketCredentials,
+  credentialsMismatch,
   type RevealedBucketCredentials,
   revealBucketCredentials,
   type ServerConfig,
@@ -222,4 +223,55 @@ export function searchOpener(
     maxRecentRows: lance.max_recent_rows,
     readOnly: options.readOnly,
   });
+}
+
+/** The environment variable a `sql` worker reads its storage options from: Lance's
+ * `storage_options` as JSON, which it gives DuckDB's `lance` extension as a secret. */
+export const SQL_STORAGE_ENV = "SESHI_SQL_STORAGE";
+/** Where DuckDB's extensions are (`<dir>/<version>/<platform>/lance.duckdb_extension`), when not
+ * beside the binary: `[search.sql] extensions`. */
+export const DUCKDB_EXTENSIONS_ENV = "SESHI_DUCKDB_EXTENSIONS";
+
+/** The `sql` workers' environment on a LanceDB index (docs/seshi/session-tools.md, "The lance
+ * extension and the worker's credential"): the storage options of `[search.sql.storage]`, the
+ * read-only credential, or without one the index's own (`ownCredential`, which the server
+ * warns of for a bucket); and where DuckDB's extensions are (`[search.sql] extensions`). Undefined for
+ * SQLite, whose workers hold nothing. The variables are the worker's own: never set in the
+ * server's environment, where `SESHI_*` names settings. */
+export function sqlWorkerEnv(
+  config: ServerConfig,
+  deployment: string,
+  env: Env,
+): { env: Record<string, string>; ownCredential: boolean } | undefined {
+  if (config.search.backend !== "lance") return undefined;
+  const storage = config.search.sql.storage;
+  const url = config.search.lance.uri ?? under(config.store.url, SEARCH_PREFIX, deployment);
+  const mismatch = credentialsMismatch(url, storage);
+  if (mismatch) throw new Error(`search.sql.storage: ${mismatch}`);
+  const where = storage
+    ? // Only the read-only keys: none of the server's own, from config or its environment.
+      lanceUri(url, { ...accessFor(config), credentials: storage }, withoutKeys(env))
+    : lanceLocation(config, deployment, env);
+  const folder = schemeOf(url) === "file";
+  // A folder index needs no secret; a bucket gets one even without keys (the machine's own).
+  const out: Record<string, string> = folder
+    ? {}
+    : { [SQL_STORAGE_ENV]: JSON.stringify(where.storageOptions) };
+  // Application Default Credentials from a key file: the index's own credential on GCS.
+  if (!storage && schemeOf(url) === "gs" && env.GOOGLE_APPLICATION_CREDENTIALS) {
+    out.GOOGLE_APPLICATION_CREDENTIALS = env.GOOGLE_APPLICATION_CREDENTIALS;
+  }
+  const extensions = config.search.sql.extensions;
+  if (extensions) out[DUCKDB_EXTENSIONS_ENV] = extensions;
+  // A folder index has no credential to narrow; a bucket's own credential can write.
+  return { env: out, ownCredential: storage === undefined && !folder };
+}
+
+/** `env` without the keys the store and LanceDB read from it, so a read-only credential is not
+ * topped up with the server's own (a session token beside another key, say). Endpoints and
+ * regions stay. */
+function withoutKeys(env: Env): Env {
+  const keys =
+    /^(AWS|S3|R2)_(ACCESS_KEY_ID|SECRET_ACCESS_KEY|SESSION_TOKEN)$|^AZURE_STORAGE_(KEY|SAS_TOKEN|CONNECTION_STRING)$|^AZURE_(FEDERATED_TOKEN_FILE|CLIENT_ID|TENANT_ID|CLIENT_SECRET)$|^GOOGLE_(APPLICATION_CREDENTIALS|SERVICE_ACCOUNT.*)$/;
+  return Object.fromEntries(Object.entries(env).filter(([name]) => !keys.test(name)));
 }

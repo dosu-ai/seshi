@@ -20,6 +20,7 @@ import {
   RuntimeConfig,
   storeOptions,
 } from "@seshi/instance";
+import { sqlBackend } from "@seshi/search/backends";
 import { openStore } from "@seshi/store";
 import { EXIT } from "../cli/exit";
 import { ServeConfigError } from "../cli/failures";
@@ -92,7 +93,7 @@ export async function openServer(
   const integrations = await ctx.integrations();
   const runtime = opened?.runtime;
   const instance = await buildInstance(loaded.config, {
-    sqlWorker: sqlWorkerCommand(),
+    sqlWorker: sqlWorkerCommand(sqlBackend()?.script),
     formats: buildFormats(integrations),
     integrations,
     env: ctx.env,

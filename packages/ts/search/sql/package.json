@@ -1,0 +1,26 @@
+{
+  "name": "@seshi/sql",
+  "private": true,
+  "description": "Layer 4: sql on a LanceDB index (docs/seshi/session-tools.md): the DuckDB side of seshi sql-worker, its statement check and its views' engine. Only the server build's -sql entry imports it.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "bun": "./src/index.ts"
+    },
+    "./testing": {
+      "bun": "./src/testing.ts"
+    }
+  },
+  "dependencies": {
+    "@duckdb/node-api": "2.0.1-r.1",
+    "@seshi/model": "workspace:*",
+    "@seshi/search": "workspace:*"
+  },
+  "devDependencies": {
+    "@lancedb/lancedb": "0.41.0",
+    "@seshi/formats": "workspace:*",
+    "@seshi/lance": "workspace:*",
+    "@seshi/pipeline": "workspace:*",
+    "@seshi/store": "workspace:*"
+  }
+}

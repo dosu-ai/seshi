@@ -17,6 +17,9 @@ export const PACKAGE_LAYERS: Readonly<Record<string, number>> = {
   search: 3,
   // The LanceDB index (F10.6), nested under ts/search; only the server build's entry imports it.
   "search/lance": 4,
+  // sql on a LanceDB index (DuckDB), nested under ts/search; only the -sql server entry imports
+  // it. Above search/lance, whose index its tests build.
+  "search/sql": 5,
   instance: 4,
   api: 5,
   capture: 5,

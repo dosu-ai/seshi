@@ -15,6 +15,7 @@
     "apps/*/src/**/*",
     "packages/ts/*/src/**/*",
     "packages/ts/search/lance/src/**/*",
+    "packages/ts/search/sql/src/**/*",
     "integrations/*/src/**/*",
     "tests/**/*",
     "scripts/**/*",

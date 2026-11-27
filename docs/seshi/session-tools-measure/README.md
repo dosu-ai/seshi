@@ -10,6 +10,7 @@ and run again.
 | `measure-roles.sql` | Per-role counts, length percentiles and characters kept at 2, 4, 8 and 32 KiB on Dosu's production sample (Supabase `memory.trace`). Aggregates only. |
 | `tool-tail.ts` | The same for tool output in local Claude Code and Codex transcripts: how far tool results run past the 2,500 characters `memory.trace` keeps. Prints aggregates only. |
 | `rebuild.ts` | Generates a synthetic store shaped like the sample, then times a full build of each backend, for the old default roles and for every role at the new caps. |
+| `sql-views.ts` | Phase 4: writes a synthetic LanceDB index (folder or bucket), then times `sql`'s DuckDB views through the real worker pool, reading with only the credential under test. |
 
 ## The cap
 
@@ -52,3 +53,38 @@ bun docs/seshi/session-tools-measure/rebuild.ts gen /tmp/m1 1000000
 bun docs/seshi/session-tools-measure/rebuild.ts build /tmp/m1 sqlite all
 bun docs/seshi/session-tools-measure/rebuild.ts build /tmp/m1 lance all
 ```
+
+## Phase 4: sql's DuckDB views over a LanceDB index (26 November 2026)
+
+Synthetic data only: 500 sessions, 100k events and 10k model calls across 20 owners, every fifth
+session owner-only. Run from a MacBook through `SqlService` and one `seshi sql-worker`. Each
+statement gets a fresh DuckDB database (the views, the lock-down, the check, `prepare`, the
+run), so every one opens the Lance tables again. Times are in ms, three runs each.
+
+| Statement | Folder | GCS (us-west1, from the laptop), admin | GCS, member |
+|---|---|---|---|
+| `count(*)` from sessions | 259, 121, 124 | 3,506, 3,065, 3,330 | 3,308, 3,260, 2,872 |
+| `count(*)` from events | 127, 130, 128 | 5,456, 4,213, 5,387 | 7,011, 6,453, 6,768 |
+| Example 1 (tokens per person and model) | 135, 119, 120 | 4,855, 4,877, 4,765 | 5,221, 5,708, 4,670 |
+| Example 2 (tools that fail most) | 130, 137, 126 | 5,733, 6,465, 6,463 | 6,560, 7,438, 6,373 |
+| Example 3 (many prompts, few tool calls) | 148, 150, 127 | 5,560, 5,502, 5,432 | 6,472, 5,915, 6,458 |
+
+On GCS the time is mostly opening the datasets over a wide-area network: a count of 500
+sessions takes 3 s. An `events` view reads `sessions` twice (its semi-join), so it costs more.
+Phase 5 measures from inside the region at 1M and 10M records. If opening stays the larger part
+there, the next step is to keep Lance's dataset cache across queries. That needs care: a
+database must still never be reused after a caller's statement.
+
+On GCS the workers read with a service-account key holding `roles/storage.objectViewer` under
+the prefix condition in [search.md](../../search.md#sql-on-a-lancedb-index). With only that key
+in its environment, the `lance` extension read the index. It was refused reading a Lance table
+elsewhere in the bucket, writing a table inside the prefix and outside it, compacting a
+six-fragment table (its version stayed 6) and cleaning up old versions. The bucket, key and
+account were deleted after the run.
+
+```bash
+bun docs/seshi/session-tools-measure/sql-views.ts gen gs://<test bucket>/search/measure 500
+SESHI_MEASURE_STORAGE='{"google_service_account_key": "<read-only key JSON>"}' \
+  bun docs/seshi/session-tools-measure/sql-views.ts time gs://<test bucket>/search/measure 3
+```
+

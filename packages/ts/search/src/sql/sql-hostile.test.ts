@@ -7,65 +7,24 @@
  * caller may see. DuckDB's cases run with the LanceDB engine. */
 
 import { Database } from "bun:sqlite";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { SqlResult } from "@seshi/model";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { checkSqlite, MAX_SQL_BYTES, SqlRefused } from "./check-sqlite";
-import { buildFixture, DECOY_MARKER, FIXTURE_NOW, SECRET_MARKER, visiblePairs } from "./fixture";
-import { type SqlCaller, SqlFailed, SqlRequestError, SqlService, sqlWindow } from "./service";
+import { buildFixture, FIXTURE_NOW } from "./fixture";
+import {
+  HOSTILE_ADMIN as ADMIN,
+  HOSTILE_CORPUS as CORPUS,
+  expectOutcome,
+  HOSTILE_FAMILIES,
+  hostileCases,
+  runCase,
+} from "./hostile";
+import { SqlService } from "./service";
 import { sqlViews } from "./views";
 
-type Expect =
-  | "ok"
-  | "truncated"
-  | "refused"
-  | "error"
-  | "runtime"
-  | "timeout"
-  | "memory"
-  | "bad_request"
-  | "no_leak";
-
-interface Case {
-  id: string;
-  family: string;
-  engines: ("sqlite" | "duckdb")[];
-  sql: string;
-  expect: Expect;
-  as?: "admin" | "member";
-  rows?: number;
-  value?: unknown;
-  since?: string;
-  until?: string;
-  match?: string;
-}
-
-const CORPUS: Case[] = readFileSync(new URL("./sql-hostile.jsonl", import.meta.url), "utf8")
-  .split("\n")
-  .filter((line) => line.trim() !== "")
-  .map((line) => JSON.parse(line) as Case);
-const CASES = CORPUS.filter((c) => c.engines.includes("sqlite"));
-
-const ADMIN: SqlCaller = {
-  viewer: { everything: true, own: [], canRead: () => true },
-  as: "ops",
-  role: "admin",
-  key: "ops",
-};
-/** alice, as a member would see: her sessions and the org's. Members never get `sql` on SQLite
- * (T11); the views still carry the rule, which this checks. */
-const ALICE: SqlCaller = {
-  viewer: {
-    everything: false,
-    own: ["alice"],
-    canRead: (s) => s.owner === "alice" || s.visibility !== "owner",
-  },
-  as: "alice",
-  role: "member",
-  key: "alice",
-};
+const CASES = hostileCases("sqlite");
 
 const TIMEOUT_MS = 2_000;
 
@@ -103,110 +62,17 @@ afterAll(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-type Outcome = { result: SqlResult } | { error: unknown };
-
-async function run(c: Case): Promise<Outcome> {
-  const caller = c.as === "member" ? ALICE : ADMIN;
-  try {
-    return {
-      result: await service.query(caller, {
-        sql: c.sql,
-        since: c.since ?? null,
-        until: c.until ?? null,
-      }),
-    };
-  } catch (error) {
-    return { error };
-  }
-}
-
-function describeOutcome(outcome: Outcome): string {
-  if ("result" in outcome) return JSON.stringify(outcome.result);
-  const error = outcome.error as Error & { code?: string; at?: number };
-  return JSON.stringify({
-    name: error.name,
-    code: error.code,
-    message: error.message,
-    at: error.at,
-  });
-}
-
 describe("the hostile-statement suite on SQLite", () => {
   it("has cases for every family the design lists, each with a known outcome", () => {
     const families = new Set(CASES.map((c) => c.family));
-    for (const family of [
-      "statement",
-      "multiple",
-      "tables",
-      "table-functions",
-      "functions",
-      "scope-admin",
-      "scope-member",
-      "errors",
-      "resources",
-      "lexing",
-    ]) {
+    for (const family of [...HOSTILE_FAMILIES, "lexing"])
       expect(families, family).toContain(family);
-    }
     expect(new Set(CORPUS.map((c) => c.id)).size).toBe(CORPUS.length);
   });
 
   for (const c of CASES) {
     it(`${c.id} (${c.expect}${c.as === "member" ? ", as a member" : ""}): ${JSON.stringify(c.sql).slice(0, 70)}`, async () => {
-      const outcome = await run(c);
-      const text = describeOutcome(outcome);
-      expect(text).not.toContain(DECOY_MARKER);
-      if (c.as === "member") expect(text).not.toContain(SECRET_MARKER);
-      const caller = c.as === "member" ? ALICE : ADMIN;
-
-      if ("result" in outcome) {
-        // Every session an answer names is one the caller may see in its window.
-        const { result } = outcome;
-        const owner = result.columns.findIndex((col) => col.name === "owner");
-        const archive = result.columns.findIndex((col) => col.name === "archive_id");
-        if (owner !== -1 && archive !== -1) {
-          const visible = visiblePairs(caller.viewer, sqlWindow(c, FIXTURE_NOW));
-          for (const row of result.rows) {
-            expect(visible, text).toContain(`${row[owner]}/${row[archive]}`);
-          }
-        }
-      }
-
-      const failed = "error" in outcome ? outcome.error : undefined;
-      switch (c.expect) {
-        case "ok":
-        case "truncated": {
-          expect(failed, text).toBeUndefined();
-          const { result } = outcome as { result: SqlResult };
-          expect(result.truncated, text).toBe(c.expect === "truncated");
-          if (c.rows !== undefined) expect(result.rows.length, text).toBe(c.rows);
-          if (c.value !== undefined) expect(result.rows[0]?.[0], text).toBe(c.value);
-          expect(JSON.stringify(result.rows).length).toBeLessThanOrEqual(1024 * 1024);
-          break;
-        }
-        case "bad_request":
-          expect(failed, text).toBeInstanceOf(SqlRequestError);
-          break;
-        case "no_leak":
-          // Whatever happens, nothing out of scope shows; a member's runtime error says nothing.
-          if (failed instanceof SqlFailed && failed.kind === "runtime") {
-            expect(failed.message).toBe("the statement failed while running");
-          }
-          break;
-        default: {
-          const kind = c.expect === "error" ? "bind" : c.expect;
-          expect(failed, text).toBeInstanceOf(SqlFailed);
-          expect((failed as SqlFailed).kind, text).toBe(kind);
-          if (c.match !== undefined) expect((failed as SqlFailed).message).toContain(c.match);
-          if (kind === "runtime" && c.as === "member") {
-            expect((failed as SqlFailed).message).toBe("the statement failed while running");
-          }
-          if (kind === "refused") {
-            const at = (failed as SqlFailed).at;
-            if (at !== undefined) expect(at).toBeLessThanOrEqual(c.sql.length);
-          }
-        }
-      }
+      expectOutcome(c, await runCase(service, c));
     }, 30_000);
   }
 

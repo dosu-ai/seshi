@@ -63,12 +63,15 @@ export {
   type WriteCondition,
 } from "./runtime";
 export {
+  DUCKDB_EXTENSIONS_ENV,
   type LanceLocation,
   LanceMissing,
   lanceLocation,
   lanceUri,
   revealedAccess,
+  SQL_STORAGE_ENV,
   searchOpener,
+  sqlWorkerEnv,
 } from "./search-index";
 export { SEARCH_JOB, searchIndexJobs } from "./search-job";
 export {

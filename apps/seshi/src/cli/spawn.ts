@@ -22,13 +22,17 @@ export function selfCommand(
 }
 
 /** How a `sql` worker is started: `seshi sql-worker` from a compiled binary, `main.ts
- * sql-worker` under Bun otherwise (`bun run`, tests), whatever script this process started as. */
+ * sql-worker` under Bun otherwise (`bun run`, tests). A process run from source that carries
+ * DuckDB (`main-server-sql.ts`) passes its engine's worker `script`, which gives the worker
+ * DuckDB as a compiled `-sql` binary's `seshi sql-worker` has it. */
 export function sqlWorkerCommand(
+  script?: string,
   argv: readonly string[] = process.argv,
   execPath = process.execPath,
 ): string[] {
-  return isCompiled(argv, execPath)
-    ? [execPath, "sql-worker"]
+  if (isCompiled(argv, execPath)) return [execPath, "sql-worker"];
+  return script !== undefined
+    ? [execPath, script]
     : [execPath, fileURLToPath(new URL("../main.ts", import.meta.url)), "sql-worker"];
 }
 

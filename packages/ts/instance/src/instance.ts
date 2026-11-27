@@ -47,7 +47,7 @@ import {
   type RuleSet,
 } from "@seshi/redact";
 import { ReviewSetupError, reviewerFromConfig } from "@seshi/review";
-import { SearchService, SqlService, type SqlSettings } from "@seshi/search";
+import { SearchService, SqlService, type SqlSettings, sqlBackend } from "@seshi/search";
 import { builtinConnectors, Sources } from "@seshi/sources";
 import {
   assertOwner,
@@ -82,7 +82,7 @@ import {
   same,
 } from "./reload";
 import type { RuntimeConfig } from "./runtime";
-import { searchOpener } from "./search-index";
+import { searchOpener, sqlWorkerEnv } from "./search-index";
 import { type InstanceStatus, instanceStatus } from "./status";
 
 export type Role = (typeof ROLES)[number];
@@ -175,6 +175,7 @@ export function sqlSettings(config: ServerConfig, workers: number): SqlSettings 
     memory: sql.memory,
     workerMemory: sql.worker_memory,
     maxRows: sql.max_rows,
+    threads: sql.threads,
   };
 }
 
@@ -377,16 +378,7 @@ export class Instance {
     this.sql =
       parts.sql === null
         ? undefined
-        : (parts.sql ??
-          (this.search
-            ? new SqlService({
-                search: this.search,
-                settings: sqlSettings(config, parts.sqlWorkers ?? 2),
-                ...(parts.sqlWorker ? { command: parts.sqlWorker } : {}),
-                now: this.now,
-                log: (line) => this.log.warn(line),
-              })
-            : undefined));
+        : (parts.sql ?? (this.search ? this.sqlService(config, parts, this.search) : undefined));
 
     this.jobs = new JobRunner({
       worker: this.roles.includes("worker"),
@@ -461,6 +453,33 @@ export class Instance {
       now: this.now,
       log: this.log,
       feed: true,
+    });
+  }
+
+  /** `sql` over the search index. On LanceDB its workers hold `[search.sql.storage]`, the
+   * read-only credential, or without one the index's own, which is worth a warning: DuckDB's
+   * `lance` extension does not honour DuckDB's own lock-down, so the credential is the wall
+   * behind the statement check. */
+  private sqlService(config: ServerConfig, parts: InstanceParts, search: SearchService) {
+    let worker: ReturnType<typeof sqlWorkerEnv>;
+    try {
+      worker = sqlWorkerEnv(config, this.deployment, parts.env ?? process.env);
+    } catch (err) {
+      throw new InstanceError(message(err), { cause: err });
+    }
+    // Only an API instance answers sql, so only it starts sql workers.
+    if (worker?.ownCredential && sqlBackend() !== undefined && this.roles.includes("api")) {
+      this.log.warn(
+        "sql: [search.sql.storage] is not set, so the sql workers read the LanceDB index with its own credential, which can write; give them a read-only one (docs/search.md)",
+      );
+    }
+    return new SqlService({
+      search,
+      settings: sqlSettings(config, parts.sqlWorkers ?? 2),
+      ...(parts.sqlWorker ? { command: parts.sqlWorker } : {}),
+      ...(worker ? { workerEnv: worker.env } : {}),
+      now: this.now,
+      log: (line) => this.log.warn(line),
     });
   }
 

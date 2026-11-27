@@ -6,10 +6,12 @@
 # the real home, keychain or agents, and two runs can go side by side. Evidence goes to
 # <repo>/.verify/seshi/<run-id>/ and survives `down`.
 #
-#   control-seshi up [--server|--idp] [--binary]
+#   control-seshi up [--server|--idp|--sql] [--binary]
 #                                               start a run; prints VERIFY_SESHI_RUN=<id>.
 #                                               --idp: server mode behind a stand-in IdP,
 #                                               signed in through the device flow
+#                                               --sql: server mode from the -sql entry
+#                                               (a LanceDB index, DuckDB for sql)
 #   control-seshi doctor                        is this run worth driving? (read-only)
 #   control-seshi env                           print the run's environment as export lines
 #   control-seshi cli [--name <label>] -- <seshi args…>
@@ -127,11 +129,12 @@ up_failed() {
 
 case $cmd in
 up)
-  mode=local binary=0 idp=0
+  mode=local binary=0 idp=0 sql=0
   while [[ $# -gt 0 ]]; do
     case $1 in
       --server) mode=server ;;
       --idp) mode=server idp=1 ;;
+      --sql) mode=server sql=1 ;;
       --binary) binary=1 ;;
       *) die "up: unknown option $1" ;;
     esac
@@ -147,7 +150,10 @@ up)
     [[ -x $REPO/dist/seshi ]] || die "no $REPO/dist/seshi: run bun run build first"
     ln -s "$REPO/dist/seshi" "$RUN/bin/seshi"
   else
-    printf '#!/bin/sh\nexec bun run "%s/apps/seshi/src/main.ts" "$@"\n' "$REPO" >"$RUN/bin/seshi"
+    # --sql: the -sql server build's entry (LanceDB and DuckDB), from source.
+    entry=main.ts
+    [[ $sql == 1 ]] && entry=main-server-sql.ts
+    printf '#!/bin/sh\nexec bun run "%s/apps/seshi/src/%s" "$@"\n' "$REPO" "$entry" >"$RUN/bin/seshi"
     chmod +x "$RUN/bin/seshi"
   fi
   EVIDENCE="$REPO/.verify/seshi/$VERIFY_SESHI_RUN"
@@ -185,6 +191,24 @@ listen = "127.0.0.1:$port"
 [store]
 url = "file://$RUN/bucket"
 EOF
+    if [[ $sql == 1 ]]; then
+      # A LanceDB index in the run's bucket, and DuckDB's lance extension from the folder the
+      # @seshi/sql tests install it into (VERIFY_SESHI_DUCKDB_EXTENSIONS to name another).
+      ext=${VERIFY_SESHI_DUCKDB_EXTENSIONS:-$REPO/node_modules/.cache/seshi-duckdb}
+      [[ -d $ext ]] || die "no DuckDB extensions in $ext: run bun --bun vitest run packages/ts/search/sql once"
+      cat >>"$RUN/seshi.toml" <<EOF
+
+[search]
+backend = "lance"
+interval = "1s"
+
+[search.lance]
+read_consistency = "0s"
+
+[search.sql]
+extensions = "$ext"
+EOF
+    fi
     if [[ $idp == 1 ]]; then
       cat >>"$RUN/seshi.toml" <<EOF
 

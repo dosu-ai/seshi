@@ -30,6 +30,9 @@ export {
   type LanceSettings,
   lanceBackend,
   provideLance,
+  provideSql,
+  type SqlEngine,
+  sqlBackend,
 } from "./backends";
 export {
   checkEventsRequest,

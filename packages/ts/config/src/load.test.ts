@@ -147,6 +147,7 @@ describe("precedence (F1.1)", () => {
         memory: 1024 ** 3,
         worker_memory: 2 * 1024 ** 3,
         max_rows: 1000,
+        threads: 2,
         members: false,
       },
     });

@@ -148,9 +148,11 @@ describe("SqlService", () => {
   });
 
   it("refuses an index it cannot read, and waits for one being built", async () => {
+    // A LanceDB index in a build without DuckDB (this process has none): 501, naming the build.
     await expect(
       service({ backend: "lance" }).query(admin, { sql: "SELECT 1" }),
     ).rejects.toBeInstanceOf(SqlUnavailable);
+    await expect(service({ backend: "lance" }).schema(admin)).rejects.toThrow(/seshi-server-sql/);
     await expect(service({ location: ":memory:" }).schema(admin)).rejects.toThrow(/in memory/);
     await expect(
       service({ ready: false }).query(admin, { sql: "SELECT 1" }),

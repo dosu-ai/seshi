@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { LOCAL_VIEWER, type Viewer } from "../viewer";
-import { buildFixture, callsOf, eventsOf, FIXTURE_NOW, FIXTURE_SESSIONS } from "./fixture";
+import { expectExample } from "./conformance";
+import { buildFixture, FIXTURE_NOW } from "./fixture";
 import { SqlService } from "./service";
 import { SQL_EXAMPLES, SQL_VIEWS, sqlSchema, sqlViews } from "./views";
 
@@ -111,6 +112,46 @@ describe("the views (SQL_VIEWS)", () => {
     expect(() => sqlViews("duckdb", member, { since: 0, until: 1 })).toThrow(/LanceDB/);
   });
 
+  it("write DuckDB's over the Lance tables, the scope in sessions and each row of events", () => {
+    const member: Viewer = { everything: false, own: ["alice"], canRead: () => true };
+    const tables = {
+      sessions: "gs://b/search/d/g1/sessions.lance",
+      events: "gs://b/search/d/g1/events.lance",
+      llm_calls: "gs://b/search/d/g1/llm_calls.lance",
+    };
+    const [sessions, events, calls] = sqlViews(
+      "duckdb",
+      member,
+      { since: 1000, until: 2000 },
+      tables,
+    );
+    expect(sessions).toContain("CREATE VIEW sessions AS");
+    expect(sessions).toContain("FROM 'gs://b/search/d/g1/sessions.lance' s");
+    expect(sessions).toContain("NOT s.removed");
+    expect(sessions).toContain("(s.visibility = 'org' OR s.owner IN ('alice'))");
+    expect(sessions).toContain("coalesce(s.started_at, epoch_ms(s.updated_ms)) < epoch_ms(2000)");
+    expect(sessions).toContain(
+      "coalesce(s.ended_at, s.started_at, epoch_ms(s.updated_ms)) >= epoch_ms(1000)",
+    );
+    // events: its own row's visibility, and a semi-join on the sessions the scope admits.
+    expect(events).toContain("FROM 'gs://b/search/d/g1/events.lance' e");
+    expect(events).toContain("(e.visibility = 'org' OR e.owner IN ('alice'))");
+    expect(events).toContain("s.owner = e.owner AND s.archive_id = e.archive_id");
+    expect(events).toContain("FROM 'gs://b/search/d/g1/sessions.lance' s");
+    expect(calls).toContain("s.owner = c.owner AND s.archive_id = c.archive_id");
+    expect(calls).not.toContain("c.visibility");
+    const admin = sqlViews("duckdb", LOCAL_VIEWER, { since: 1000, until: 2000 }, tables).join("\n");
+    expect(admin).not.toContain("visibility = 'org'");
+    expect(admin).toContain("NOT s.removed");
+    // Locations come from meta; one that is not a Lance table is refused all the same.
+    expect(() =>
+      sqlViews("duckdb", member, { since: 0, until: 1 }, { ...tables, events: "x.csv" }),
+    ).toThrow(/not a Lance table/);
+    expect(
+      sqlViews("duckdb", member, { since: 0, until: 1 }, { ...tables, events: "/a'b/e.lance" })[1],
+    ).toContain("FROM '/a''b/e.lance' e");
+  });
+
   it("answer times as SQLite's own UTC text, so datetime() compares with them", async () => {
     const result = await service.query(ADMIN, {
       sql: "SELECT ts, ts > datetime('now', '-30 days') AS recent FROM events ORDER BY ts LIMIT 1",
@@ -121,12 +162,6 @@ describe("the views (SQL_VIEWS)", () => {
 });
 
 describe("the examples (conformance)", () => {
-  /** What the fixture holds, worked out without SQL: sessions not removed, started within 30
-   * days (the default window and example 1's predicate agree on the fixture). */
-  const live = FIXTURE_SESSIONS.map((s, i) => ({ s, n: i + 1 })).filter(
-    ({ s }) => !s.removed && s.started > FIXTURE_NOW - 30 * 86_400_000,
-  );
-
   it("are served for SQLite as the schema endpoint gives them", async () => {
     const schema = await service.schema(ADMIN);
     expect(schema.examples).toEqual([...SQL_EXAMPLES.sqlite]);
@@ -135,56 +170,14 @@ describe("the examples (conformance)", () => {
   });
 
   it("1. tokens per person and model", async () => {
-    const want = new Map<string, number>();
-    for (const { s, n } of live) {
-      for (const call of callsOf(s, n)) {
-        const key = `${s.owner}\t${call.model}`;
-        want.set(key, (want.get(key) ?? 0) + (call.input_tokens ?? 0) + (call.output_tokens ?? 0));
-      }
-    }
-    const result = await service.query(ADMIN, { sql: SQL_EXAMPLES.sqlite[0] as string });
-    expect(result.columns.map((c) => c.name)).toEqual(["owner", "model", "tokens"]);
-    const got = result.rows.map((r) => [`${r[0]}\t${r[1]}`, r[2]]);
-    expect(new Map(got as [string, number][])).toEqual(want);
-    const tokens = result.rows.map((r) => r[2] as number);
-    expect(tokens).toEqual([...tokens].sort((a, b) => b - a));
+    await expectExample(service, ADMIN, "sqlite", 0);
   });
 
   it("2. tools that fail most, by repo", async () => {
-    const byRepo = new Map<string, { failed: number; calls: number }>();
-    for (const { s, n } of live) {
-      for (const e of eventsOf(s, n)) {
-        if (e.role !== "tool_result") continue;
-        const key = `${s.repo}\t${e.tool_name}`;
-        const seen = byRepo.get(key) ?? { failed: 0, calls: 0 };
-        seen.calls++;
-        if (e.ok === false) seen.failed++;
-        byRepo.set(key, seen);
-      }
-    }
-    const want = [...byRepo]
-      .filter(([, v]) => v.calls > 20)
-      .sort((a, b) => b[1].failed - a[1].failed)
-      .map(([k, v]) => [...k.split("\t"), v.failed, v.calls]);
-    expect(want.length).toBeGreaterThan(0);
-    const result = await service.query(ADMIN, { sql: SQL_EXAMPLES.sqlite[1] as string });
-    expect(result.rows).toEqual(want);
+    await expectExample(service, ADMIN, "sqlite", 1);
   });
 
   it("3. sessions with many prompts and few tool calls", async () => {
-    const want = live
-      .map(({ s, n }) => {
-        const events = eventsOf(s, n);
-        return [
-          s.owner,
-          s.archive,
-          events.filter((e) => e.role === "user").length,
-          events.filter((e) => e.role === "tool_call").length,
-        ];
-      })
-      .filter(([, , prompts, calls]) => (prompts as number) > 10 && (calls as number) < 5);
-    expect(want.length).toBeGreaterThan(0);
-    const result = await service.query(ADMIN, { sql: SQL_EXAMPLES.sqlite[2] as string });
-    expect(result.rows).toEqual(want);
+    await expectExample(service, ADMIN, "sqlite", 2);
   });
 });

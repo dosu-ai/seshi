@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Subprocess } from "bun";
-import type { SqlWorkerRequest, SqlWorkerResponse } from "./protocol";
+import { sqlBackend } from "../backends";
+import type { SqlJob, SqlWorkerResponse } from "./protocol";
 import { protocolLine } from "./worker";
 
 /** The queue is full, or the caller already has its queries in flight (`429 sql_busy`). */
@@ -29,8 +30,11 @@ export interface SqlPoolOptions {
   /** How often the watchdog reads a busy worker's memory, in ms (250). */
   pollMs?: number;
   /** Extra time past a query's `timeout_ms` before the watchdog kills it (0: SQLite has no
-   * interrupt to wait for). */
+   * interrupt to wait for; DuckDB's worker interrupts its own query at the timeout). */
   graceMs?: number;
+  /** What the workers' environment holds besides `PATH`, `HOME` and `TMPDIR` (the read-only
+   * storage credential, on LanceDB). */
+  env?: Readonly<Record<string, string>>;
   /** How long queries wait while no worker is up (all starting or restarting) before they are
    * answered `internal`, in ms (20 s). A wait for busy workers has no limit here: the queue's
    * length and each query's timeout bound it. */
@@ -48,13 +52,17 @@ export interface SqlPoolStatus {
   restarts: number;
 }
 
-/** The command that runs `worker-main.ts` with this Bun: for tests and `bun run`, where there is
- * no seshi binary to name. A compiled binary passes `[seshi, "sql-worker"]` instead. */
+/** The command that runs a worker script with this Bun: for tests and `bun run`, where there is
+ * no seshi binary to name. `worker-main.ts` here, or, in a process given DuckDB (`provideSql`),
+ * the DuckDB engine's own, which gives its worker DuckDB too. A compiled binary passes
+ * `[seshi, "sql-worker"]` instead. */
 export function scriptWorkerCommand(): string[] {
-  return [process.execPath, fileURLToPath(new URL("./worker-main.ts", import.meta.url))];
+  const script =
+    sqlBackend()?.script ?? fileURLToPath(new URL("./worker-main.ts", import.meta.url));
+  return [process.execPath, script];
 }
 
-type Request = Omit<SqlWorkerRequest, "id">;
+type Request = SqlJob;
 
 interface Job {
   principal: string;
@@ -120,8 +128,8 @@ const RESTART_MAX_MS = 5_000;
  * query at a time; the watchdog kills one that runs past its deadline or its memory limit,
  * answers its query `timeout` or `memory`, and starts another. */
 export class SqlPool {
-  private readonly options: Required<Omit<SqlPoolOptions, "log" | "rss">> &
-    Pick<SqlPoolOptions, "log">;
+  private readonly options: Required<Omit<SqlPoolOptions, "log" | "rss" | "env">> &
+    Pick<SqlPoolOptions, "log" | "env">;
   private readonly rss: (pid: number) => Promise<number | undefined>;
   private readonly slots: Slot[] = [];
   private readonly queue: Job[] = [];
@@ -149,9 +157,11 @@ export class SqlPool {
     for (let i = 0; i < Math.max(1, options.workers); i++) this.slots.push(this.spawn());
   }
 
-  /** The workers' environment, built, not inherited: no seshi settings, tokens or keys. */
+  /** The workers' environment, built, not inherited: no seshi settings, tokens or keys, only
+   * what `env` names for them. */
   private env(): Record<string, string> {
     const env: Record<string, string> = {
+      ...this.options.env,
       HOME: this.home,
       TMPDIR: this.home,
       TMP: this.home,
