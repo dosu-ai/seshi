@@ -600,9 +600,15 @@ signature, so they ship as published. Hence T9:
   run time the worker sets `extension_directory` to that folder and turns off autoinstall,
   autoload, community extensions and unsigned extensions; DuckDB checks the signature at
   `LOAD`. A missing or mismatched extension makes `sql` answer 501 and `seshi doctor` fail.
-- **The image.** `apps/seshi/Dockerfile` takes `VARIANT=sql`; the release publishes
-  `seshi-server-sql:<version>` beside `seshi-server:<version>`. Estimated sizes, to be measured
-  in phase 5: amd64 384 → about 800 MB uncompressed, about 340 MB gzipped.
+- **The image.** `apps/seshi/Dockerfile` takes `VARIANT=sql`; the release publishes it as
+  `ghcr.io/dosu-ai/seshi:<version>-sql` (and `X.Y-sql`, `latest-sql`) beside the default
+  image's tags, so no second package is needed. Measured in phase 5 (27 November): amd64 390 →
+  782 MB uncompressed (178 → 311 MB gzipped), arm64 517 → 891 MB (210 → 333 MB). The default
+  image did not grow.
+- **DuckDB's own library.** `bun build --compile` embeds the binding (`duckdb.node`) but not
+  the `libduckdb.so` it links from its own folder, so a compiled binary could not load DuckDB.
+  The archive and the image put the library, stripped (96.5 → 74.3 MB on x64), in
+  `duckdb/lib/` beside the binary, and the worker loads it from there before the binding.
 - **Versions.** An extension is built for one DuckDB version, so bumping `@duckdb/node-api`
   means new entries in `duckdb-extensions.json`, and the release job refuses a mismatch.
 
@@ -888,9 +894,13 @@ can run beside 4; 6 needs 3 (and 4 and 5 for LanceDB).
 ## Open questions
 
 1. **The tool-result cap,** settled in phase 2 by the measurement and the 2.5× budget (T5).
-2. **`lance` against object storage.** The spike ran on a local folder. Phase 4 measures the
-   views on GCS and checks that the extension takes the worker's read-only credential from its
-   environment on GCS, S3 and Azure, as LanceDB does.
+2. **`lance` against object storage.** Settled. Phase 4 checked that the extension takes the
+   worker's read-only credential from its environment on GCS, S3 and Azure, and that on GCS
+   the key could read the index and nothing else. Phase 5 timed the views from inside
+   us-west1 with that key: at 1M records every example takes 1.0–1.3 s warm (1.3–1.7 s on a
+   cold worker); at 10M, 1.4 s for example 1 (sessions and model calls) and 2.3–3.4 s for
+   those that scan `events`, members' at the upper end. Opening the tables costs about 0.6 s a
+   statement. The numbers are in `session-tools-measure/README.md` on the phase 5 branch.
 3. **Whether DuckDB ever pushes a caller's predicate below a view's filter.** The spike saw
    none, for one data shape and plan. The suite keeps the probes, and members' runtime errors
    carry no message either way.
