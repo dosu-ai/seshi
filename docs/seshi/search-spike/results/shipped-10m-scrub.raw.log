@@ -1,0 +1,124 @@
+Copying gs://seshi-lance-remeasure-1125-54e757/harness/setup.sh to file:///spike/setup.sh
+  
+
+++ command -v /usr/bin/time
+++ export PATH=/root/.bun/bin:/root/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+++ PATH=/root/.bun/bin:/root/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+++ '[' '!' -x /spike/seshi-server ']'
+++ cd /spike/repo
+++ bun --version
+1.4.2
+++ uname -a
+Linux seshi-lance-remeasure 6.1.0-56-cloud-amd64 #1 SMP PREEMPT_DYNAMIC Debian 6.1.192-2 (2026-11-16) x86_64 GNU/Linux
+++ nproc
+8
+++ free -g
+++ head -2
+               total        used        free      shared  buff/cache   available
+Mem:              31           0          28           0           2          30
+++ df -h /
+++ tail -1
+/dev/sda1        99G  3.5G   91G   4% /
+++ ls -la /spike/seshi-server
+-rwxr-xr-x 1 root root 273008096 Nov 25 18:53 /spike/seshi-server
+++ /spike/seshi-server --version
+seshi 0.28.0
+++ du -sh 'node_modules/@lancedb/*/' packages/ts/search/lance/node_modules/@lancedb/lancedb/
+1.7M	packages/ts/search/lance/node_modules/@lancedb/lancedb/
+++ SH=docs/seshi/search-spike/shipped
++ gcloud storage cp gs://seshi-lance-remeasure-1125-54e757/harness/steady.ts docs/seshi/search-spike/shipped/steady.ts
+Copying gs://seshi-lance-remeasure-1125-54e757/harness/steady.ts to file://docs/seshi/search-spike/shipped/steady.ts
+  
+
++ U=gs://seshi-lance-remeasure-1125-54e757/b10m
++ T bun docs/seshi/search-spike/shipped/steady.ts gs://seshi-lance-remeasure-1125-54e757/b10m maintain
++ /usr/bin/time -v bun docs/seshi/search-spike/shipped/steady.ts gs://seshi-lance-remeasure-1125-54e757/b10m maintain
++ grep -vE '^\s+(Average|Exit|Socket|Signals|Swaps|Page size|File system|Voluntary|Involuntary|Minor|Major|Percent|System time|User time|Command being)'
+generation gmwwjfqqhecc67365 {"ready_at":"2026-11-25T21:09:01.795Z","caught_up_at":"2026-11-25T21:09:01.795Z","sessions":117446,"events":10000054,"generation":"gmwwjfqqhecc67365"}
+  createTable events start rss 0.1GB
+  createTable done 182ms rss 0.1GB
+  scalarIndexes events start rss 5.9GB
+error: lance error: LanceError(IO): Resources exhausted: Additional allocation failed for ExternalSorterMerge[0] with top memory consumers (across reservations) as:
+  ExternalSorter[0]#798(can spill: true) consumed 690.7 MB, peak 1159.1 MB,
+  ExternalSorterMerge[0]#799(can spill: false) consumed 509.1 MB, peak 700.9 MB.
+Error: Failed to allocate additional 330.8 KB for ExternalSorterMerge[0] with 0.0 B already allocated for this reservation - 162.5 KB remain available for the total memory pool: fair(pool_size: 1200.0 MB), /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/lance-datafusion-14.0.2/src/chunker.rs:49:46  Caused by: LanceError(IO): Resources exhausted: Additional allocation failed for ExternalSorterMerge[0] with top memory consumers (across reservations) as:
+    ExternalSorter[0]#798(can spill: true) consumed 690.7 MB, peak 1159.1 MB,
+    ExternalSorterMerge[0]#799(can spill: false) consumed 509.1 MB, peak 700.9 MB.
+  Error: Failed to allocate additional 330.8 KB for ExternalSorterMerge[0] with 0.0 B already allocated for this reservation - 162.5 KB remain available for the total memory pool: fair(pool_size: 1200.0 MB), /usr/local/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/lance-datafusion-14.0.2/src/chunker.rs:49:46    Caused by: Resources exhausted: Additional allocation failed for ExternalSorterMerge[0] with top memory consumers (across reservations) as:
+      ExternalSorter[0]#798(can spill: true) consumed 690.7 MB, peak 1159.1 MB,
+      ExternalSorterMerge[0]#799(can spill: false) consumed 509.1 MB, peak 700.9 MB.
+    Error: Failed to allocate additional 330.8 KB for ExternalSorterMerge[0] with 0.0 B already allocated for this reservation - 162.5 KB remain available for the total memory pool: fair(pool_size: 1200.0 MB)
+ code: "GenericFailure"
+
+
+Bun v1.4.2 (Linux x64)
+Command exited with non-zero status 1
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 3:30.69
+	Maximum resident set size (kbytes): 7099136
++ LANCE_MEM_POOL_SIZE=8589934592
++ T bun docs/seshi/search-spike/shipped/steady.ts gs://seshi-lance-remeasure-1125-54e757/b10m maintain
++ /usr/bin/time -v bun docs/seshi/search-spike/shipped/steady.ts gs://seshi-lance-remeasure-1125-54e757/b10m maintain
++ grep -vE '^\s+(Average|Exit|Socket|Signals|Swaps|Page size|File system|Voluntary|Involuntary|Minor|Major|Percent|System time|User time|Command being)'
+generation gmwwjfqqhecc67365 {"ready_at":"2026-11-25T21:09:01.795Z","caught_up_at":"2026-11-25T21:09:01.795Z","sessions":117446,"events":10000054,"generation":"gmwwjfqqhecc67365"}
+  createTable events start rss 0.1GB
+  createTable done 194ms rss 0.1GB
+  scalarIndexes events start rss 6.0GB
+    index id 6509ms rss 5.6GB
+    index owner 2633ms rss 5.6GB
+    index archive_id 3041ms rss 5.5GB
+    index session_updated 2239ms rss 5.5GB
+    index visibility 2906ms rss 5.5GB
+    index role 3254ms rss 5.5GB
+    index format 3084ms rss 5.5GB
+    index models 4153ms rss 5.5GB
+    index labels 3240ms rss 5.5GB
+  scalarIndexes done 31061ms rss 5.5GB
+  textIndexes events start rss 5.5GB
+    index text 156172ms rss 6.8GB
+    index text_prefix 272683ms rss 8.7GB
+  textIndexes done 428855ms rss 8.7GB
+  createTable sessions start rss 8.6GB
+  createTable done 133ms rss 8.6GB
+  scalarIndexes sessions start rss 8.7GB
+    index id 421ms rss 8.7GB
+  scalarIndexes done 421ms rss 8.7GB
+  textIndexes sessions start rss 8.7GB
+  textIndexes done 0ms rss 8.7GB
+  createTable cursors start rss 8.7GB
+  createTable done 137ms rss 8.7GB
+  scalarIndexes cursors start rss 8.7GB
+  scalarIndexes done 0ms rss 8.7GB
+  textIndexes cursors start rss 8.7GB
+  textIndexes done 0ms rss 8.7GB
+  createTable seen start rss 8.7GB
+  createTable done 113ms rss 8.7GB
+  scalarIndexes seen start rss 8.6GB
+    index key 351ms rss 8.6GB
+  scalarIndexes done 352ms rss 8.6GB
+  textIndexes seen start rss 8.6GB
+  textIndexes done 0ms rss 8.6GB
+maintain 670.5s rss 8.3GB
+state {"ready_at":"2026-11-25T21:09:01.795Z","caught_up_at":"2026-11-25T21:09:01.795Z","sessions":117446,"events":10000054,"generation":"gmwwjfqqhecc67365"}
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 11:11.44
+	Maximum resident set size (kbytes): 10863868
++ gcloud storage du -s gs://seshi-lance-remeasure-1125-54e757/b10m
+79227712920  gs://seshi-lance-remeasure-1125-54e757/b10m
++ bun docs/seshi/search-spike/shipped/search.ts gs://seshi-lance-remeasure-1125-54e757/b10m 2 --sort relevance --only word
+state {"ready_at":"2026-11-25T21:09:01.795Z","caught_up_at":"2026-11-25T21:09:01.795Z","sessions":117446,"events":10000054,"generation":"gmwwjfqqhecc67365"}
+sort | filter | query | open | first | warm p50 | warm p90 | min | total | capped
+relevance | admin | rare word [zeppelinx] | 234ms | 2663ms | 257ms | 257ms | 213ms | 97 sessions, 20 hits | 
+relevance | admin | one common word [error] | 227ms | 5035ms | 1585ms | 1585ms | 1573ms | 8495 sessions, 20 hits | capped
+relevance | admin | two common words, AND [error test] | 290ms | 4862ms | 1440ms | 1440ms | 1387ms | 8511 sessions, 20 hits | capped
+relevance | admin | very common word [the] | 214ms | 4715ms | 1587ms | 1587ms | 1513ms | 8552 sessions, 20 hits | capped
+relevance | admin | word and prefix (error deplo*) [error deplo*] | 226ms | 14143ms | 10030ms | 10030ms | 9940ms | 8502 sessions, 20 hits | capped
+relevance | member | rare word [zeppelinx] | 228ms | 2144ms | 226ms | 226ms | 214ms | 83 sessions, 20 hits | 
+relevance | member | one common word [error] | 227ms | 5007ms | 1657ms | 1657ms | 1648ms | 8305 sessions, 20 hits | capped
+relevance | member | two common words, AND [error test] | 217ms | 4631ms | 1470ms | 1470ms | 1428ms | 8359 sessions, 20 hits | capped
+relevance | member | very common word [the] | 233ms | 4656ms | 1886ms | 1886ms | 1709ms | 8385 sessions, 20 hits | capped
+relevance | member | word and prefix (error deplo*) [error deplo*] | 248ms | 13199ms | 9564ms | 9564ms | 9533ms | 8281 sessions, 20 hits | capped
+relevance | member+label+model | rare word [zeppelinx] | 223ms | 1442ms | 125ms | 125ms | 118ms | 5 sessions, 5 hits | 
+relevance | member+label+model | one common word [error] | 220ms | 4932ms | 1987ms | 1987ms | 1961ms | 4049 sessions, 20 hits | capped
+relevance | member+label+model | two common words, AND [error test] | 225ms | 5224ms | 1762ms | 1762ms | 1715ms | 4031 sessions, 20 hits | capped
+relevance | member+label+model | very common word [the] | 219ms | 5009ms | 2111ms | 2111ms | 2081ms | 3997 sessions, 20 hits | capped
+relevance | member+label+model | word and prefix (error deplo*) [error deplo*] | 216ms | 7767ms | 4540ms | 4540ms | 4383ms | 3973 sessions, 20 hits | capped
+exit 0
