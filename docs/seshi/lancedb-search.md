@@ -35,8 +35,8 @@ instance.** SQLite stays the default and the only backend in serverless mode.
 The spike ([results](search-spike/README.md)) found it works at 10M records on GCS, which is
 about four months of a 50-person team: most searches answer in 0.2 to 1 s. (Its prefix
 timings, 2 to 5 s, were taken on an index that missed most matches, and are unmeasured for the
-one phase 2 built; see [prefixes](#query-semantics).) Its limit is maintenance, which rewrites the whole index and takes 8 to 9 minutes at that
-size, so it fits a team up to roughly 10 to 30M records (see [risks](#risks)). The first
+one phase 2 built; see [prefixes](#query-semantics).) Its limit is maintenance, which rewrites the whole index and, as shipped, takes 17 minutes at
+that size, so it fits a team up to about 10M records (see [risks](#risks)). The first
 version ships one table and revisits that when a team nears it ([past the limit](#past-the-limit)).
 
 What this does not include: analytics (tokens and spend), semantic search, and ClickHouse. The
@@ -343,7 +343,9 @@ of each result, and the counts in `state()`.
 `changes (stamp, owner, name, entry)`, with `entry` as JSON. `meta (key, value)` sits outside
 the generations and holds the schema (`seshi/search-lance/1`), the deployment, `search.events`,
 the live and building generations, `ready_at`, `caught_up_at`, `feed_through`, the session and
-event counts, and `scrub_due`.
+event counts, and the scrub's state: `scrub_due`, `scrubbed_at`, `scrub_started_at` and
+`scrub_beat_at` while one runs, `scrub_tried_request` (the request it started with), and after
+one fails `scrub_failed_at`, `scrub_error` and `scrub_failures`.
 
 ## Query semantics
 
@@ -507,12 +509,19 @@ are missing. The feed copy is safe for the same reason as today: `feed_through` 
 the rows up to it are written.
 
 Each commit makes a table version, so a page costs six or seven commits. At the default
-`search.interval` that is fine: a 50-person team adds about one record a second, and a split
-page commits about 2,500. A first build is different: a year of that team is about 32M
-records, which is three to four hours one page per commit. So while a generation is being
+`search.interval` that is fine: a 50-person team adds about one record a second, and a page
+commits about 700 a second as shipped. A first build is different: a year of that team is
+about 32M records, which is half a day or more one page per commit. So while a generation is being
 built, `IndexWriter.batchRecords` asks the indexer to gather one owner's pages until they hold
 50,000 records (events and session rows), and commit them as one `PageCommit`, the same steps
 over the union; plain `add()` of 100,000-row batches wrote 14,000 records a second in the spike.
+As shipped, a first build ran at 2,300 records a second at 1M records (7 minutes) and 1,950 at
+10M (86 minutes, against the spike's 26), and through the `Indexer` reading a store at 1,400 a
+second at 1M (12 minutes). A commit of 50,000 records takes about 8 s; the rest is the
+build-time `optimize()` below (phase 2), which grows with the table and runs every 100,000
+rows, so its total grows with the square of the build: 31% of the time at 1M, 53% at 10M. By
+that curve a year of a 50-person team (32M records) takes about ten hours to build, eight of
+them in `optimize()`.
 Each session is in a commit once: one named again on a later page is planned again from its
 metadata as read then, and both plans start from what the index held before the batch, which is
 what `commit()` checks them against. The cursor moves to the last page's end, still only after
@@ -539,13 +548,15 @@ tables in 12 minutes and built every index in 5.
 
 - **`optimize()`** compacts small fragments, adds new rows to the indexes and prunes old
   versions. In the spike it cost about as much as building the indexes again, however little
-  had changed: 58 s at 1M records and 8 to 9 minutes at 10M, after ten small pages.
+  had changed: 58 s at 1M records and 8 to 9 minutes at 10M, after ten small pages. As shipped,
+  `maintain()` optimizing every table took 135 s at 1M and 17 minutes at 10M (13 GB of
+  memory).
   0.41.0's TypeScript API has no option to only append to the indexes. Skipping it costs too:
   at 10M, with 18,000 rows from ten pages unindexed in ten small fragments, broad searches
   took two to three times as long (`error` 2.9 s instead of 1.3 s), and a rare word 400 ms
   instead of 240 ms ([maintenance](search-spike/README.md#maintenance)). So it runs every
   `search.lance.optimize` (an hour), only when something was committed, which at 10M records
-  is about 15% of the worker's time. That cost grows with the table; past about 10M records it
+  is about 28% of the worker's time. That cost grows with the table; past about 10M records it
   is the limit on this design (see [risks](#risks)). `cleanupOlderThan` is now minus 15
   minutes, so a reader on an older version finishes its query. `deleteUnverified` stays off,
   as LanceDB advises while other processes may read.
@@ -560,19 +571,83 @@ tables in 12 minutes and built every index in 5.
   a data file that only older table versions name, with no deleted rows to show for it. Once
   a day (`search.lance.scrub`), if a scrub is due, the worker rewrites `events` and `sessions`
   (always, for that reason) and any other table that holds deleted rows: it copies the live
-  rows into a new table in the same generation, builds its indexes once it is filled,
-  switches `meta` to it, and deletes the old table, with all its versions, after the
-  15-minute grace. A test checks the bytes: after the scrub and the grace, no file holds the
-  removed or redacted text. Indexing
+  rows into a new table in the same generation, indexes it, switches `meta` to it, and
+  deletes the old table, with all its versions, after the 15-minute grace. The copy's scalar
+  indexes are built over its first million rows and extended by `optimize()` after each
+  further million (`scrubPartRows`), and its full-text indexes once it is filled; see
+  [the scrub at 10M](#the-scrub-at-10m-records) for why. A test checks the bytes: after the
+  scrub and the grace, no file holds the removed or redacted text. Indexing
   pauses during the scrub. On GCS the spike confirmed the problem (1,293 deleted rows before
   and after `optimize()`) and timed the scrub: 73 s at 1M records and 8 minutes at 10M, most
-  of it the full-text indexes. The copy is fully indexed and compact, so a scrub also does what
+  of it the full-text indexes. As shipped it took 89 s at 1M, and **failed at 10M**: after
+  copying the rows, building the copy's btree on `events.id` ran out of LanceDB's memory pool
+  (1.2 GB by default; `Resources exhausted`), twice. With `LANCE_MEM_POOL_SIZE` at 8 GB it
+  finished in 11 minutes (4.5 of them indexing `text_prefix`), at 10.9 GB of memory. A failed scrub leaves
+  `scrub_due` set, so every later pass tries it again instead of `optimize()`, and leaves a copy
+  of `events` that nothing drops ([risks](#risks)). The copy is fully indexed and compact, so a scrub also does what
   `optimize()` would, and the worker skips `optimize()` on a pass that scrubs.
+- **A failed scrub** must not leak storage or stop the worker. It drops the copy it was making
+  (unless `meta` already names it: a switch whose write landed before it failed), records
+  `scrub_failed_at`, `scrub_error` and `scrub_failures` in `meta`, and leaves `scrub_due` set.
+  `maintain()` then optimizes as on any other pass and throws the error, so the job's run
+  records it and the worker's log has all of it. The worker tries again an hour later, then
+  two, four and so on, at most a day apart, or on its next pass after `seshi search --scrub`:
+  a request other than the one the failed scrub started with (`scrub_tried_request`), compared
+  by value since the CLI and the worker read different clocks. Meanwhile every pass indexes and
+  runs `optimize()` as usual. A scrub stopped by its signal (a graceful shutdown) is not a
+  failure: it drops its copy and clears its keys.
+- **A scrub that stops part-way** (the worker killed out of memory, or a deploy) cannot record
+  anything itself. It sets `scrub_started_at` when it starts and moves `scrub_beat_at` on at
+  most once a minute as it goes. A pass that finds a beat older than 30 minutes, longer than
+  any one step, records the failure the same way. A newer beat is another worker's scrub:
+  seshi asks for one worker (X7.2) but does not enforce it, and a rolling deploy runs two for a
+  while, so that pass leaves the scrub, its copy and the upkeep alone. Each scrub, and each
+  failure, first drops any table of the live or building generation that `meta` neither names
+  nor holds in the trash, so a copy left by a killed scrub goes too. Two workers that start a
+  scrub on the same pass are not guarded against. A finished scrub empties every one of these
+  keys in the write that sets `scrubbed_at`, so a worker killed just after it is not taken for
+  one that stopped.
+- **Reporting.** `state()` returns a failure as `scrub_failed`. `seshi search --status`,
+  `seshi doctor --config` (`search-scrub`, a warning) and the job's backlog (`scrub_failures`)
+  show it, and while a deletion is due they say its text is still in the bucket. A finished
+  scrub clears it.
 
 The bound for deleted text is therefore `search.lance.scrub` plus the grace: a day and a quarter
-of an hour by default. That is weaker than SQLite, where the delete is in the transaction, and
-`docs/search.md` says so, as it already says the SQLite file holds session text. An operator who
-needs it sooner runs `seshi search --scrub`, which asks the worker to scrub on its next pass.
+of an hour by default, while scrubs succeed. That is weaker than SQLite, where the delete is in
+the transaction, and `docs/search.md` says so, as it already says the SQLite file holds session
+text. An operator who needs it sooner runs `seshi search --scrub`, which asks the worker to scrub on its next pass.
+
+### The scrub at 10M records
+
+The re-measure of 25 November found the scrub failing at 10M records on GCS: after copying
+`events`, building the copy's btree on `id` over the whole table ran out of LanceDB's memory
+pool (`Resources exhausted` in `ExternalSorterMerge`), twice. That pool is 150 MB a core
+unless `LANCE_MEM_POOL_SIZE` says otherwise (1,200 MB on an `e2-standard-8`); with 8 GB the
+scrub finished in 11 minutes.
+
+A larger pool was not the fix. LanceDB reads `LANCE_MEM_POOL_SIZE` from the process's
+environment, and Bun's `process.env` does not reach a native library's `getenv`, so seshi
+cannot set it from config: only whoever starts the worker can. And how much the sort needs
+depends on where the table is read from, not only its size: on local disk the same 10M-row
+btree built in a 20 MB pool, while through an object store it failed in 1,200 MB. So the
+scrub sorts less at a time instead. It builds the copy's scalar indexes over the first 1M
+rows, and after each further 1M `optimize()` adds them, which sorts only the new rows and
+merges them into the index. Measured on an Apple M-series laptop (12 cores) with the 10M
+index of the re-measure's generator, the pool set to 1,200 MB as on an `e2-standard-8`:
+
+| Where | How | Copy and scalar indexes | Whole scrub | Peak memory |
+|---|---|---|---|---|
+| Local S3 (rustfs) | whole table at once (before) | fails after 12 minutes, as on GCS | fails | 10.2 GB |
+| Local S3 (rustfs) | 1M-row parts | 4.8 minutes | 7.1 minutes | 14.6 GB |
+| Local disk | whole table at once (before) | 1.2 minutes (100 MB pool) | 4.1 minutes | 14.7 GB |
+| Local disk | 1M-row parts | 2.9 minutes (100 MB pool) | 5.7 minutes | 14.3 GB |
+
+In a 300 MB pool, a 2-core host's, the parts finished too (4.1 minutes on local S3 without the
+full-text indexes). At 1M records there is one part, so the scrub is as before (34 s on local
+disk). The parts
+cost about 90 s at 10M on local disk, the nine `optimize()` calls; that buys a sort that no
+longer grows with the table. Most of the memory is not LanceDB's pool: the copy's reads, and
+building `text_prefix`'s full-text index, which the pool does not bound.
 
 ## Rebuild
 
@@ -688,7 +763,7 @@ max_recent_rows = 100000        # sort = recent
   with LanceDB's error), that the worker's keys can write the location (a probe object written
   and deleted through the store client with the same keys), whether the live generation was
   written under another schema, and how old `caught_up_at` is. It warns when `events` holds
-  more than 20M records ([risks](#risks)).
+  more than 10M records ([risks](#risks)); it was 20M until the re-measure.
 
 ### The binary: the server build
 
@@ -875,30 +950,53 @@ the mean, a person adds about 2,500 searchable records and 1,700 LLM calls per w
 These are heavy, early users, so treat the table as an upper estimate. It is about twice the
 guess in the scoping PR.
 
+In the bucket, the index as shipped took 7.4 GB at 1M records and 43.5 GB at 10M after a first
+build (all tables, their indexes, and versions inside the 15-minute grace): 2 to 3.6 times the
+spike's `events.lance`, partly the `text_prefix` column. Built through the `Indexer` from a
+store, 1M records took 10.3 GB beside a 622 MB store.
+
 ## Risks
 
 - **Pre-1.0 library.** LanceDB's full-text index is its own and recent, and 0.41.0 differs from
   its docs (`withPosition`). Pin exact versions, run the conformance suite on every upgrade, and
   keep SQLite as the default.
 - **Deleted text stays up to a day.** Stated above, bounded by the scrub, and on demand with
-  `--scrub`. If LanceDB's TypeScript API gains a way to force deletion materialization, the
+  `--scrub`. Longer when a scrub fails: then it is retried with a backoff of up to a day, and
+  `--status`, `seshi doctor --config` and the job's backlog say so ([maintenance](#maintenance)).
+  If LanceDB's TypeScript API gains a way to force deletion materialization, the
   scrub becomes an `optimize()` option.
 - **Maintenance grows with the table, and sets the size limit.** `optimize()` and the scrub
-  each rewrite the indexes of the whole table: about 1 minute at 1M records and 8 to 9 minutes
-  at 10M on an `e2-standard-8`, with indexing paused, and 14 GB of memory for the scrub. By
-  that line, a year of a 50-person team ([sizes](#sizes), about 32M records) costs about half
-  an hour per run, so an hourly `optimize()` would take half the worker's time; a 500-person
-  team's year is out of reach. So this design fits an `events` table up to roughly 10 to 30M
-  records, and `seshi doctor` warns above 20M. The first version ships one `events` table, and
-  the limit is revisited when a deployment nears it; see [past the limit](#past-the-limit).
-- **Prefix queries may be slow** at 10M records: the spike's 2 to 5 s was measured on the
-  ngram index phase 2 replaced, and the word-prefix column is unmeasured at that size ([query
-  semantics](#query-semantics)). Its candidates are exact, so it should do no worse; if it is
-  too slow, raise the minimum length to 3, or limit prefixes to `sort = recent`, whose windows
-  keep the candidates few. The column also makes `events` larger than the design assumed.
-- **Cold reads from object storage.** On GCS the first query on a new connection took 1 to
-  3 s, so instances keep their tables open. Each search reads from the bucket (100 to 250 ms
-  for a rare word), and each read is a billed request.
+  each rewrite the indexes of the whole table. As shipped, on an `e2-standard-8`, `optimize()`
+  took 135 s at 1M records and 17 minutes at 10M (13 GB of memory), twice the spike's, with
+  indexing paused; hourly, that is 28% of the worker's time at 10M. By that line a year of a
+  50-person team ([sizes](#sizes), about 32M records) costs about an hour per run, which an
+  hourly `optimize()` cannot keep up with. So this design fits an `events` table up to about
+  10M records, and `seshi doctor` warns above 10M (it was 20M before the re-measure). The
+  first version ships one `events` table, and the limit is revisited when a deployment nears
+  it; see [past the limit](#past-the-limit).
+- **The scrub needs memory at 10M records.** It failed there in the re-measure: building the
+  copy's btree on `events.id` over the whole table ran out of LanceDB's default memory pool.
+  It now builds the copy's scalar indexes over 1M rows at a time, and a failed scrub drops its
+  copy and backs off; it still peaks near 15 GB at 10M records, so size the worker's host for
+  it ([the scrub at 10M](#the-scrub-at-10m-records)).
+- **Prefix queries are slow:** about 6 s at 10M records, 10 s beside a word, and 11 to 16 s
+  sorted by recent (1.1 to 1.5 s at 1M). Its candidates are exact, but each one's text is read
+  from the bucket and checked, up to the cap, so it did worse than the spike's 4.6 s, not
+  "no worse" as this design expected ([query semantics](#query-semantics)). Ways to cut it:
+  check candidates in score or time order only until the page is full (the total becomes an
+  estimate), a lower cap for prefix queries, a minimum length of 3, or a narrowing filter (a
+  label and a model brought `deplo*` to 3.6 s). The column also makes `events` larger than the
+  design assumed ([sizes](#sizes)).
+- **The recent sort is slower than the spike's** for broad words: 3.6 s at 10M against 0.6 s,
+  because it searches at the 100,000 cap before it looks back a day, a week, a month. Starting
+  from the day window would avoid the large search for any word a day holds enough of.
+- **Cold reads from object storage.** On GCS the first query on a new connection took 1.2 to
+  3.8 s for words, and 8 to 19 s for prefixes at 10M, so instances keep their tables open. Each
+  search reads from the bucket (150 to 350 ms for a rare word), and each read is a billed
+  request.
+- **A first build is slow:** 86 minutes at 10M records, and about ten hours for a year of a
+  50-person team, most of it the build-time `optimize()` ([ingest](#ingest)). Search answers
+  from the old generation, or SQLite, meanwhile.
 - **Image size.** About 181 MB more in the amd64 image and 284 MB more in the arm64 one, with
   LanceDB's library stripped ([the binary](#the-binary-the-server-build)); laptops' binaries
   carry none of it. A fat-LTO arm64 build of LanceDB would likely save about 100 MB more.
@@ -907,7 +1005,7 @@ guess in the scoping PR.
 
 ## Past the limit
 
-The first version keeps one `events` table, and `seshi doctor` warns above 20M records. When a
+The first version keeps one `events` table, and `seshi doctor` warns above 10M records. When a
 deployment nears that, these are the ways on, cheapest change first:
 
 - **Delta indexes.** Lance's Rust and Python layers can index only new rows without merging
@@ -938,7 +1036,7 @@ grouping searches is settled: [TypeScript](#duckdb-compared-in-the-spike).
 
 | Phase | What | Size |
 |---|---|---|
-| 0. Spike | Done, 24–25 November ([results](search-spike/README.md)): latency at 1M and 10M records on GCS, TypeScript against DuckDB for grouping, prefix checks, commit, `optimize()` and scrub times, and the image size. | Done |
+| 0. Spike | Done, 24–25 November ([results](search-spike/README.md)): latency at 1M and 10M records on GCS, TypeScript against DuckDB for grouping, prefix checks, commit, `optimize()` and scrub times, and the image size. Re-measured on the shipped code on 25 November ([re-measure](search-spike/README.md#re-measure-of-the-shipped-code-25-november-2026)): slower prefixes, recent sort and maintenance, and a scrub that fails at 10M; the doctor's limit moved from 20M to 10M. | Done |
 | 1. Seam | `IndexReader` and `IndexWriter`, `drain()` onto `commit()`, `MatchTree`, `state()`, `IndexUnavailable`, the `OpenIndex` factory, `SearchStatus.location`, `excerpt()`. SQLite only, with no change in behaviour; existing tests keep their assertions. | 4–6 days |
 | 2. Backend | Done: `LanceIndex` (`lance.ts`, `lance-query.ts`, `lanceIndex()` as `@seshi/search/lance`; phase 3 moved them to `@seshi/lance`): tables and `meta`, `commit()`, the query compiler, filters and escaping, grouping, prefixes, `maintain()` with the scrub, generations. The conformance suite on SQLite, a folder and S3, and the crash tests. While a generation is being built, its tables are optimized every 100,000 committed rows, so the scalar indexes `mergeInsert`, `delete` and the lookups use keep up. A build gathers each owner's pages into commits of 50,000 records (`IndexWriter.batchRecords`; see [ingest](#ingest)). | 1.5 weeks |
 | 3. Deploy | Done: the config schema (`[search.lance]`, with `storageOptions` from `[store]` or its own keys), `worker` placement for this backend and `readOnly` for API instances, the server build ([the binary](#the-binary-the-server-build)), `capped` ("at least N"), `--status`, `--rebuild`, `--wait` and `--scrub`, `seshi sync search`, `seshi doctor --config`, spec/layout.md's `search/` entry, and docs. An end-to-end test runs a worker process from `main-server.ts` and a read-only API instance on a folder and on S3. | 1 week |

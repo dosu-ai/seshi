@@ -17,7 +17,14 @@ import { EXIT } from "../cli/exit";
 import { Style, stripStyle } from "../cli/style";
 import { INTEGRATIONS } from "../integrations";
 import { main } from "../main";
-import { highlighted, searchLines, timeArg, waitForRebuild } from "./search";
+import {
+  highlighted,
+  scrubFailedLine,
+  searchLines,
+  statusLines,
+  timeArg,
+  waitForRebuild,
+} from "./search";
 
 const formats = new FormatRegistry(BUILTIN_FORMATS);
 const line = (record: Record<string, unknown>) => `${JSON.stringify(record)}\n`;
@@ -400,6 +407,42 @@ describe("the command's pieces", () => {
         index: { ready_at: "", sessions: 0 },
       }),
     ).toEqual(["Exploring: no more sessions match."]);
+  });
+
+  it("says when the last scrub failed, and that deleted text is still in the files", () => {
+    const lines = statusLines({
+      backend: "lance",
+      location: "gs://b/search/d/",
+      ready: true,
+      ready_at: "2026-11-14T00:00:00.000Z",
+      caught_up_at: "2026-11-14T12:00:00.000Z",
+      sessions: 9,
+      events: 90,
+      generation: "g1",
+      scrub_failed: {
+        at: "2026-11-14T11:00:00.000Z",
+        error: "Resources exhausted",
+        failures: 2,
+        retry_at: "2026-11-14T13:00:00.000Z",
+        due_since: "2026-11-14T09:30:00.000Z",
+      },
+    });
+    expect(lines.at(-1)).toBe(
+      "scrub failed 2026-11-14 11:00 (2 times in a row): Resources exhausted. Text deleted, retracted or redacted since 2026-11-14 09:30 is still in the index's files. The worker tries again at 2026-11-14 13:00, or on its next pass after seshi search --scrub",
+    );
+  });
+
+  it("claims no deleted text when the scrub that failed was only asked for", () => {
+    expect(
+      scrubFailedLine({
+        at: "2026-11-14T11:00:00.000Z",
+        error: "Resources exhausted",
+        failures: 1,
+        retry_at: "2026-11-14T12:00:00.000Z",
+      }),
+    ).toBe(
+      "scrub failed 2026-11-14 11:00: Resources exhausted. The worker tries again at 2026-11-14 12:00, or on its next pass after seshi search --scrub",
+    );
   });
 
   it("says at least N when the index stopped counting at its cap", () => {

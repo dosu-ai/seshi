@@ -226,6 +226,22 @@ export interface IndexState {
   stale_schema?: string;
   /** Requests waiting for the indexer's next pass, with when each was made (LanceDB). */
   requested?: { rebuild?: string; scrub?: string };
+  /** The last scrub failed (LanceDB, F10.12), so deleted, retracted and redacted text is still
+   * in the storage. */
+  scrub_failed?: ScrubFailure;
+}
+
+/** A scrub that failed, or stopped part-way, and when the indexer tries it again. */
+export interface ScrubFailure {
+  /** When it failed: for one that stopped part-way, when the next pass found it. */
+  at: string;
+  error: string;
+  /** Failures in a row since the last scrub that finished. */
+  failures: number;
+  /** When the indexer tries again; a scrub asked for after `at` runs on the next pass. */
+  retry_at: string;
+  /** Since when text that should have left the storage is still there. */
+  due_since?: string;
 }
 
 /** The API's side: what `SearchService.search`, `status` and `changes` call. It reads the live
