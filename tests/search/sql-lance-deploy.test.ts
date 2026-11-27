@@ -18,6 +18,7 @@ import { provideLance } from "@seshi/search";
 import { duckdbSql, provideSql } from "@seshi/sql";
 import { lanceExtensions } from "@seshi/sql/testing";
 import { FetchAzureBlobClient } from "@seshi/store";
+import { sqlServerChecks, sqlStatus } from "seshi/doctor-sql";
 import { buildFormats } from "seshi/integrations";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -127,9 +128,12 @@ describe.each(VARIANTS)("sql on a LanceDB index served from $name", (variant) =>
   let adminToken: string;
   let api: Instance;
 
-  function config(storage?: string): string {
+  /** The store, the same for every instance (a bucket variant names a fresh prefix each call). */
+  let store: string;
+  function config(storage?: string, extensionsAt = extensions): string {
+    store ??= variant.store(dir);
     return [
-      variant.store(dir),
+      store,
       "[search]",
       'backend = "lance"',
       'interval = "200ms"',
@@ -140,7 +144,7 @@ describe.each(VARIANTS)("sql on a LanceDB index served from $name", (variant) =>
       "[search.sql]",
       // Where the API's sql workers find DuckDB's lance extension (beside the binary in the
       // -sql image).
-      `extensions = "${extensions}"`,
+      `extensions = "${extensionsAt}"`,
       "",
       ...(storage ? ["[search.sql.storage]", storage] : []),
       "[worker]",
@@ -153,6 +157,7 @@ describe.each(VARIANTS)("sql on a LanceDB index served from $name", (variant) =>
     const path = join(dir, `seshi-${apis.length}.toml`);
     writeFileSync(path, text, { mode: 0o600 });
     const made = await buildInstance(loadServerConfig({ configFlag: path, env }).config, {
+      sqlWorkers: 1,
       formats: buildFormats(),
       roles: ["api"],
       id: `api-${apis.length}`,
@@ -324,6 +329,80 @@ describe.each(VARIANTS)("sql on a LanceDB index served from $name", (variant) =>
       const answer = as(wrong, adminToken).sql({ sql: "SELECT count(*) FROM sessions" });
       await expect(answer).rejects.toBeInstanceOf(ServerError);
       await expect(answer).rejects.not.toMatchObject({ code: "sql_refused" });
+    },
+    120_000,
+  );
+
+  it.skipIf(variant.skip)(
+    "passes seshi doctor's sql checks: lance loads, the workers read, and the credential is checked",
+    async () => {
+      await until(async () => {
+        const r = await sql(as(api, adminToken), "SELECT count(*) FROM sessions");
+        return r?.rows[0]?.[0] === 2 ? r : undefined;
+      }, "the index");
+      const checks = await sqlServerChecks(api, api.config, { env });
+      const sqlCheck = checks.find((c) => c.id === "sql");
+      expect(sqlCheck, JSON.stringify(checks)).toMatchObject({
+        status: "ok",
+        summary: expect.stringMatching(/^DuckDB read the LanceDB index in \d+ ms \(2 sessions\)$/),
+      });
+      // CI's rustfs and Azurite have one key, which can write: the doctor says so. A folder has
+      // no credential to narrow.
+      const credential = checks.find((c) => c.id === "sql-credential");
+      if (variant.storage === undefined) expect(credential).toBeUndefined();
+      else {
+        expect(credential).toMatchObject({
+          status: "fail",
+          summary: expect.stringContaining("can write where the index lives"),
+        });
+      }
+      expect(checks.find((c) => c.id === "sql-workers")).toMatchObject({
+        status: "ok",
+        summary: expect.stringMatching(/^this check's: 1 started, 0 busy, 0 queued, 0 restarted$/),
+      });
+      expect(sqlStatus(api)).toMatchObject({
+        engine: "duckdb",
+        ...(variant.storage ? { credential: "read-only" } : {}),
+        workers: { workers: 1, restarts: 0 },
+      });
+    },
+    120_000,
+  );
+
+  it.skipIf(variant.skip)(
+    "fails seshi doctor's sql check when the lance extension is not where it looks",
+    async () => {
+      await until(async () => {
+        const r = await sql(as(api, adminToken), "SELECT count(*) FROM sessions");
+        return r?.rows[0]?.[0] === 2 ? r : undefined;
+      }, "the index");
+      const empty = mkdtempSync(join(tmpdir(), "seshi-no-extensions-"));
+      try {
+        const bare = await instance(config(variant.storage?.(true), empty));
+        const checks = await sqlServerChecks(bare, bare.config, { env });
+        expect(checks.find((c) => c.id === "sql")).toMatchObject({
+          status: "fail",
+          summary: expect.stringContaining("DuckDB's lance extension did not load"),
+        });
+      } finally {
+        rmSync(empty, { recursive: true, force: true });
+      }
+    },
+    120_000,
+  );
+
+  it.skipIf(variant.skip || variant.storage === undefined)(
+    "fails seshi doctor's sql check when [search.sql.storage] cannot read the index",
+    async () => {
+      await until(async () => {
+        const r = await sql(as(api, adminToken), "SELECT count(*) FROM sessions");
+        return r?.rows[0]?.[0] === 2 ? r : undefined;
+      }, "the index");
+      const wrong = await instance(config(variant.storage?.(false)));
+      const checks = await sqlServerChecks(wrong, wrong.config, { env });
+      expect(checks.find((c) => c.id === "sql")?.status).toBe("fail");
+      // Refused a write too, but it could not read either.
+      expect(checks.find((c) => c.id === "sql-credential")?.status).not.toBe("ok");
     },
     120_000,
   );

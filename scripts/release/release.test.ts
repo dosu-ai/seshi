@@ -161,6 +161,9 @@ describe.skipIf(!supported || process.platform === "win32")("the host's release"
       out: release,
       targets: [hostTarget()],
       packageExtension: async (outfile) => writeFileSync(outfile, "a vsix"),
+      // The -sql build fetches DuckDB's extension (about 90 MB); CI's binaries job builds and
+      // runs it on Linux.
+      sql: false,
     });
   }, 180_000);
   afterAll(() => rmSync(dir, { recursive: true, force: true }));

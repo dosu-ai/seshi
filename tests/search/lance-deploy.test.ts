@@ -347,6 +347,8 @@ describe.each(VARIANTS)("LanceDB search served from $name", (variant) => {
         ["search", "ok"],
         ["search-write", "ok"],
         ["search-fresh", "ok"],
+        // The server build has no DuckDB: sql on LanceDB is the -sql build's.
+        ["sql", "skip"],
       ]);
       if (variant.name === "a folder") {
         // The index is in the bucket, under search/<deployment>/ (F10.9).

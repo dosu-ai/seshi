@@ -1,13 +1,22 @@
 import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { gzipSync } from "node:zlib";
 import { VERSION } from "@seshi/model";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   buildCommand,
   checkLanceNative,
+  duckdbBindings,
+  duckdbLibrary,
+  duckdbNativePackage,
+  duckdbPlatform,
+  duckdbVersion,
+  extensionPin,
+  fetchExtension,
   lanceNativeLibrary,
   lanceNativePackage,
+  readExtensionPins,
   stripElf,
 } from "./build-binary";
 
@@ -68,6 +77,120 @@ describe("the server build (F10.6)", () => {
     if (process.platform === "linux") {
       expect(() => checkLanceNative(ROOT, other)).toThrow(/--os=darwin/);
     }
+  });
+});
+
+describe("the -sql server build (docs/seshi/session-tools.md, T9)", () => {
+  const bindings = [
+    "@duckdb/node-bindings-darwin-arm64",
+    "@duckdb/node-bindings-linux-x64",
+    "@duckdb/node-bindings-linux-x64-musl",
+    "@duckdb/node-bindings-win32-x64",
+  ];
+
+  it("starts from main-server-sql.ts and keeps only the target's DuckDB binding", () => {
+    const { argv } = buildCommand({
+      root: "/repo",
+      target: "bun-linux-x64-baseline",
+      sql: true,
+      duckdbBindings: bindings,
+    });
+    expect(argv[2]).toBe("/repo/apps/seshi/src/main-server-sql.ts");
+    const line = argv.join(" ");
+    expect(line).toContain("--external @lancedb/lancedb-*-musl");
+    expect(line).toContain("--external @duckdb/node-bindings-darwin-arm64");
+    expect(line).toContain("--external @duckdb/node-bindings-linux-x64-musl");
+    expect(line).toContain("--external @duckdb/node-bindings-win32-x64");
+    expect(line).not.toContain("--external @duckdb/node-bindings-linux-x64 ");
+    // The plain server build names no DuckDB at all.
+    expect(buildCommand({ root: "/repo", server: true }).argv.join(" ")).not.toContain("duckdb");
+  });
+
+  it("names the target's binding package and DuckDB's platform", () => {
+    expect(duckdbNativePackage("bun-linux-x64-baseline")).toBe("@duckdb/node-bindings-linux-x64");
+    expect(duckdbNativePackage("bun-linux-arm64")).toBe("@duckdb/node-bindings-linux-arm64");
+    expect(duckdbNativePackage(undefined, { platform: "darwin", arch: "arm64" })).toBe(
+      "@duckdb/node-bindings-darwin-arm64",
+    );
+    expect(() => duckdbNativePackage("bun-windows-x64")).toThrow(/Linux and macOS/);
+    expect(duckdbPlatform("bun-linux-x64-baseline")).toBe("linux_amd64");
+    expect(duckdbPlatform("bun-linux-arm64")).toBe("linux_arm64");
+    expect(duckdbPlatform(undefined, { platform: "darwin", arch: "arm64" })).toBe("osx_arm64");
+  });
+
+  it("reads the DuckDB version and bindings this workspace installs, and pins lance for it on Linux", () => {
+    expect(duckdbVersion(ROOT)).toMatch(/^v\d+\.\d+\.\d+$/);
+    expect(duckdbBindings(ROOT)).toContain("@duckdb/node-bindings-linux-x64");
+    const pins = readExtensionPins(ROOT);
+    for (const platform of ["linux_amd64", "linux_arm64"]) {
+      const pin = extensionPin(pins, duckdbVersion(ROOT), platform, "lance");
+      expect(pin.url).toBe(
+        `https://extensions.duckdb.org/${duckdbVersion(ROOT)}/${platform}/lance.duckdb_extension.gz`,
+      );
+      expect(pin.sha256).toMatch(/^[0-9a-f]{64}$/);
+    }
+    if (process.platform !== "win32") {
+      expect(duckdbLibrary(ROOT, undefined)).toMatch(/libduckdb\.(so|dylib)$/);
+    }
+  });
+
+  it("refuses a DuckDB version or platform the pins do not name", () => {
+    const pins = readExtensionPins(ROOT);
+    expect(() => extensionPin(pins, "v0.0.1", "linux_amd64", "lance")).toThrow(
+      /DuckDB v0.0.1, which scripts\/duckdb-extensions.json pins no extensions for/,
+    );
+    expect(() => extensionPin(pins, duckdbVersion(ROOT), "linux_riscv", "lance")).toThrow(
+      /no lance for DuckDB .* on linux_riscv/,
+    );
+  });
+
+  describe("fetchExtension", () => {
+    let cache: string;
+    beforeAll(() => {
+      cache = mkdtempSync(join(tmpdir(), "seshi-duckdb-ext-"));
+    });
+    afterAll(() => rmSync(cache, { recursive: true, force: true }));
+    const body = gzipSync(Buffer.from("a signed extension"));
+    const sha256 = new Bun.CryptoHasher("sha256").update(body).digest("hex");
+    const url = "https://extensions.duckdb.org/v9.9.9/linux_amd64/lance.duckdb_extension.gz";
+
+    it("checks the download against its pin, unpacks it, and keeps it in the cache", async () => {
+      let fetched = 0;
+      const fetch = async () => {
+        fetched++;
+        return body;
+      };
+      const pin = { url, sha256 };
+      expect(new TextDecoder().decode(await fetchExtension(pin, { cache, fetch }))).toBe(
+        "a signed extension",
+      );
+      expect(new TextDecoder().decode(await fetchExtension(pin, { cache, fetch }))).toBe(
+        "a signed extension",
+      );
+      expect(fetched).toBe(1);
+      expect(readdirSync(join(cache, "v9.9.9/linux_amd64"))).toEqual(["lance.duckdb_extension.gz"]);
+    });
+
+    it("refuses a download that does not match its pin, and a cached copy that does not either", async () => {
+      const other = gzipSync(Buffer.from("another build"));
+      await expect(
+        fetchExtension({ url, sha256: "0".repeat(64) }, { fetch: async () => other }),
+      ).rejects.toThrow(/has SHA-256 [0-9a-f]{64}, not the 0{64}/);
+      // A cached copy that no longer matches is fetched again.
+      writeFileSync(join(cache, "v9.9.9/linux_amd64/lance.duckdb_extension.gz"), other);
+      let fetched = 0;
+      await fetchExtension(
+        { url, sha256 },
+        {
+          cache,
+          fetch: async () => {
+            fetched++;
+            return body;
+          },
+        },
+      );
+      expect(fetched).toBe(1);
+    });
   });
 });
 

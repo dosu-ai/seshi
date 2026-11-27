@@ -1,8 +1,16 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { buildCommand, checkLanceNative, stripLanceNative } from "../build-binary";
-import { checksumFile, readArchive, sha256, tarGz, zip } from "./archive";
+import {
+  buildCommand,
+  checkLanceNative,
+  type DuckdbFile,
+  duckdbBindings,
+  duckdbFiles,
+  extensionCache,
+  stripLanceNative,
+} from "../build-binary";
+import { type ArchiveEntry, checksumFile, readArchive, sha256, tarGz, zip } from "./archive";
 import { adhocSign } from "./macho-sign";
 import {
   CHECKSUMS,
@@ -10,6 +18,7 @@ import {
   hostTarget,
   INSTALL_SCRIPTS,
   serverAsset,
+  serverSqlAsset,
   TARGETS,
   type Target,
   targetById,
@@ -30,8 +39,14 @@ export interface BuildReleaseOptions {
   targets?: readonly Target[];
   version?: string;
   mtime?: number;
-  /** Compiles `target`; with `server`, the server build (`main-server.ts`, with LanceDB). */
-  compile?: (target: Target, outfile: string, server: boolean) => Promise<void>;
+  /** Compiles `target` as `variant`: the laptop build, the server build (`main-server.ts`,
+   * with LanceDB), or the `-sql` server build (`main-server-sql.ts`, with DuckDB too). */
+  compile?: (target: Target, outfile: string, variant: Variant) => Promise<void>;
+  /** What a `-sql` binary for `target` needs beside it: DuckDB's library and its extensions,
+   * fetched and checked against scripts/duckdb-extensions.json (`duckdbFiles`). */
+  duckdb?: (target: Target) => Promise<DuckdbFile[]>;
+  /** Build the `-sql` server archives (true): false leaves them out, for a test of the rest. */
+  sql?: boolean;
   /** Packages the Cursor extension into `outfile` (a .vsix). */
   packageExtension?: (outfile: string) => Promise<void>;
   log?: (line: string) => void;
@@ -58,6 +73,9 @@ export function repositoryVersion(root = ROOT): string {
 /** What a compiled binary needs before it ships: a darwin binary gets a fresh ad-hoc signature,
  * because Bun leaves its own, no longer valid, Developer ID signature on the x64 build
  * (`macho-sign.ts`). Both darwin targets are signed the same way, on any build machine. */
+/** Which build of seshi a binary is. */
+export type Variant = "plain" | "server" | "sql";
+
 export function finishBinary(target: Target, outfile: string): void {
   if (target.os !== "darwin") return;
   writeFileSync(outfile, adhocSign(readFileSync(outfile), "seshi"));
@@ -67,13 +85,19 @@ export async function compileTarget(
   target: Target,
   outfile: string,
   root = ROOT,
-  server = false,
+  variant: Variant = "plain",
 ): Promise<void> {
-  if (server) {
+  if (variant !== "plain") {
     checkLanceNative(root, target.bun);
     stripLanceNative(root, target.bun);
   }
-  const { argv } = buildCommand({ root, target: target.bun, outfile, server });
+  const { argv } = buildCommand({
+    root,
+    target: target.bun,
+    outfile,
+    server: variant !== "plain",
+    ...(variant === "sql" ? { sql: true, duckdbBindings: duckdbBindings(root) } : {}),
+  });
   mkdirSync(dirname(outfile), { recursive: true });
   const proc = Bun.spawn(argv, { cwd: root, stdout: "pipe", stderr: "pipe" });
   const [code, out, err] = await Promise.all([
@@ -85,10 +109,17 @@ export async function compileTarget(
   finishBinary(target, outfile);
 }
 
-export function archiveFor(target: Target, binary: Uint8Array, license: Uint8Array, mtime = 0) {
-  const entries = [
+export function archiveFor(
+  target: Target,
+  binary: Uint8Array,
+  license: Uint8Array,
+  mtime = 0,
+  beside: readonly DuckdbFile[] = [],
+) {
+  const entries: ArchiveEntry[] = [
     { name: target.binary, data: binary, mode: 0o755 },
     { name: "LICENSE", data: license, mode: 0o644 },
+    ...beside.map((f) => ({ name: f.name, data: f.data, mode: 0o644 })),
   ];
   return target.os === "windows" ? zip(entries, mtime) : tarGz(entries, mtime);
 }
@@ -106,7 +137,9 @@ export async function buildRelease(options: BuildReleaseOptions): Promise<Releas
   const mtime = options.mtime ?? Date.now();
   const compile =
     options.compile ??
-    ((t: Target, outfile: string, server: boolean) => compileTarget(t, outfile, root, server));
+    ((t: Target, outfile: string, variant: Variant) => compileTarget(t, outfile, root, variant));
+  const duckdb =
+    options.duckdb ?? ((t: Target) => duckdbFiles(root, t.bun, { cache: extensionCache(root) }));
   const license = readFileSync(join(root, "LICENSE"));
   mkdirSync(options.out, { recursive: true });
 
@@ -114,21 +147,42 @@ export async function buildRelease(options: BuildReleaseOptions): Promise<Releas
   const assets: ReleaseAsset[] = [];
   const builds = targets.flatMap((target) => {
     const server = serverAsset(target);
+    const sql = options.sql === false ? undefined : serverSqlAsset(target);
     return [
-      { target, asset: target.asset, dir: target.id, server: false },
-      ...(server ? [{ target, asset: server, dir: `${target.id}-server`, server: true }] : []),
+      { target, asset: target.asset, dir: target.id, variant: "plain" as Variant },
+      ...(server
+        ? [{ target, asset: server, dir: `${target.id}-server`, variant: "server" as Variant }]
+        : []),
+      ...(sql
+        ? [{ target, asset: sql, dir: `${target.id}-server-sql`, variant: "sql" as Variant }]
+        : []),
     ];
   });
-  for (const { target, asset, dir, server } of builds) {
+  for (const { target, asset, dir, variant } of builds) {
     const outfile = join(options.out, "bin", dir, target.binary);
-    rmSync(outfile, { force: true });
+    rmSync(join(options.out, "bin", dir), { recursive: true, force: true });
+    // The extension is fetched and checked first: a version without pins fails before any
+    // compile of this target's -sql build.
+    const beside = variant === "sql" ? await duckdb(target) : [];
     log(`compile ${dir} (${target.bun})`);
-    await compile(target, outfile, server);
+    await compile(target, outfile, variant);
+    // The binary as the archive lays it out, so a smoke test can run it from here.
+    for (const file of beside) {
+      mkdirSync(dirname(join(options.out, "bin", dir, file.name)), { recursive: true });
+      writeFileSync(join(options.out, "bin", dir, file.name), file.data);
+    }
     const binary = readFileSync(outfile);
-    const archive = archiveFor(target, binary, license, mtime);
-    const back = readArchive(asset, archive).find((e) => e.name === target.binary);
-    if (!back || sha256(back.data) !== sha256(binary)) {
+    const archive = archiveFor(target, binary, license, mtime, beside);
+    const back = readArchive(asset, archive);
+    const archived = back.find((e) => e.name === target.binary);
+    if (!archived || sha256(archived.data) !== sha256(binary)) {
       throw new Error(`${asset}: the archived binary differs from the compiled one`);
+    }
+    for (const file of beside) {
+      const entry = back.find((e) => e.name === file.name);
+      if (!entry || sha256(entry.data) !== sha256(file.data)) {
+        throw new Error(`${asset}: the archived ${file.name} differs from the fetched one`);
+      }
     }
     writeFileSync(join(options.out, asset), archive);
     files.set(asset, archive);
@@ -136,7 +190,7 @@ export async function buildRelease(options: BuildReleaseOptions): Promise<Releas
       name: asset,
       sha256: sha256(archive),
       size: archive.byteLength,
-      ...(server ? {} : { target: target.id }),
+      ...(variant === "plain" ? { target: target.id } : {}),
     });
     if (target.id === hostTargetId()) await checkRuns(outfile, version);
   }

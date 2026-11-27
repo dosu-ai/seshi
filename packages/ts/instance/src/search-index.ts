@@ -263,6 +263,26 @@ export function sqlWorkerEnv(
   return { env: out, ownCredential: storage === undefined && schemeOf(url) !== "file" };
 }
 
+/** `[search.sql.storage]`, the sql workers' read-only credential, as `openStore` takes it at
+ * the index's location, and with none of the server's own keys from its environment: what
+ * `seshi doctor` checks cannot write. Undefined without one, or for an index that is not on a
+ * LanceDB bucket. */
+export function sqlCredentialAccess(
+  config: ServerConfig,
+  deployment: string,
+  env: Env,
+): { url: string; options: ReturnType<typeof revealedAccess> & { env: Env } } | undefined {
+  const storage = config.search.sql.storage;
+  if (config.search.backend !== "lance" || storage === undefined) return undefined;
+  const url = config.search.lance.uri ?? under(config.store.url, SEARCH_PREFIX, deployment);
+  if (schemeOf(url) === "file") return undefined;
+  const { credentials: _own, ...access } = revealedAccess(config);
+  return {
+    url,
+    options: { ...access, credentials: revealBucketCredentials(storage), env: withoutKeys(env) },
+  };
+}
+
 /** `env` without the keys the store and LanceDB read from it, so a read-only credential is not
  * topped up with the server's own (a session token beside another key, say). Endpoints and
  * regions stay. */

@@ -28,7 +28,7 @@ import {
   readme,
 } from "./npm";
 import { CHECKSUMS, hostTarget, REPOSITORY, TARGETS, targetById } from "./targets";
-import { exec, installPackages, standInCompile } from "./testing";
+import { exec, installPackages, standInCompile, standInDuckdb } from "./testing";
 
 const VERSION = repositoryVersion();
 const posix = process.platform !== "win32";
@@ -150,7 +150,11 @@ describe.skipIf(!posix)("buildNpm", () => {
       `if [ "$1" = "--stdin" ]; then cat; fi`,
       `exit "\${EXIT:-0}"`,
     ].join("\n");
-    await buildRelease({ out: release, compile: standInCompile(VERSION, body).compile });
+    await buildRelease({
+      out: release,
+      compile: standInCompile(VERSION, body).compile,
+      duckdb: standInDuckdb().duckdb,
+    });
     packages = await buildNpm({ version: VERSION, from: release, out });
   }, 120_000);
   afterAll(() => {
@@ -231,7 +235,11 @@ describe.skipIf(!posix)("buildNpm", () => {
   it("refuses archives that do not match SHA256SUMS, or a missing line", async () => {
     const bad = mkdtempSync(join(tmpdir(), "seshi-npm-bad-"));
     try {
-      await buildRelease({ out: bad, compile: standInCompile(VERSION).compile });
+      await buildRelease({
+        out: bad,
+        compile: standInCompile(VERSION).compile,
+        duckdb: standInDuckdb().duckdb,
+      });
       const target = TARGETS[2];
       if (!target) throw new Error("no target");
       writeFileSync(join(bad, target.asset), tarGz([{ name: "seshi", data: new Uint8Array(3) }]));

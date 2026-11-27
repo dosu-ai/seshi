@@ -24,6 +24,9 @@
     },
     "./capture-runtime": {
       "bun": "./src/capture-runtime.ts"
+    },
+    "./doctor-sql": {
+      "bun": "./src/doctor/sql.ts"
     }
   },
   "scripts": {
