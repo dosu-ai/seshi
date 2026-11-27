@@ -77,6 +77,11 @@ export const COMMANDS: Readonly<Record<string, CommandSpec>> = {
     summary: "forget the stored credentials",
     load: () => import("./logout"),
   },
+  mcp: {
+    summary:
+      "an MCP server for coding agents: list, search and read the sessions you may read (stdio)",
+    load: () => import("./mcp"),
+  },
   normalize: {
     summary: "print a transcript as canonical, redacted records (any format this binary reads)",
     load: () => import("./normalize"),

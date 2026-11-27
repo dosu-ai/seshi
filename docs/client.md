@@ -76,6 +76,8 @@ answer back.
 | `changes({after, since, limit})` | `GET /v1/changes`: the caller's change feed |
 | `allChanges({after, since, limit})` | `GET /v1/changes/all`: every owner's change feed as one, each entry with its `owner`; `after` is the last page's opaque `cursor`. For service tokens and admins (`Forbidden` for anyone else); a `ServerError` with status 503 while the server's search index is first built, 404 with search off ([server.md](server.md#every-owners-change-feed)) |
 | `search(request)` | `GET /v1/search` ([search.md](search.md)) |
+| `searchSessions(request)` | `GET /v1/search/sessions`: sessions that overlap a window (the last 7 days by default), newest first, as a `SessionList`; `since`/`until` a time or an age (`7d`), `after` the last page's `cursor` ([search.md](search.md#listing-and-reading-sessions)) |
+| `sessionEvents(format, id, request, {owner})`, `sessionEventsByArchive(owner, archiveId, request)` | `GET …/events`: part of a session's events, numbered by `seq` across its traces (`SessionEvents`). Every refusal is a `ServerError`: 404, 410 `redacted`, 409 `head_changed`, 400 `bad_query` |
 | `me()` | `GET /v1/me`: who the credential is, and which bucket the server writes |
 | `owners({after, limit})` | `GET /v1/owners` |
 | `redactionRules()`, `redactionRulesSince(etag)` | `GET /v1/redaction/rules`, for redacting before upload |
@@ -199,9 +201,11 @@ The same calls as `@dosu/seshi-client`, in snake_case:
 | `set_visibility(format, id, visibility, owner=)` | `setVisibility` | `PATCH /v1/sessions/:format/:id` |
 | `reviews(format, id, owner=)` | `reviews` | `GET …/reviews` |
 | `get_session_by_archive(owner, archive_id)`, `get_trace_by_archive(owner, archive_id, hash=, render=)`, `reviews_by_archive(owner, archive_id)` | `getSessionByArchive`, `getTraceByArchive`, `sessionReviewsByArchive` | `GET /v1/owners/:owner/sessions/:archive_id` and its `/trace` and `/reviews`: the same, by the owner and archive id a change entry or search result names |
+| `session_events(format, id, owner=, from_=, to=, around=, context=, mode=, roles=, max_chars=, event=, offset=, trace=, head=)`, `session_events_by_archive(owner, archive_id, …)` | `getEvents`, `getEventsByArchive` | `GET …/events`: part of the session's events, numbered by `seq`, as a `SessionEvents` model (`from_` is sent as `from`; `roles` a list, sent comma-separated). Every refusal is a `ServerError`: 404 not stored or not readable, 410 `redacted`, 409 `head_changed`, 400 `bad_query` |
 | `changes(owner=, after=, since=, limit=)`, `iter_changes(…)` | `changes` | `GET /v1/changes`, a page or every page to the end |
 | `all_changes(after=, since=, limit=)`, `iter_all_changes(…)` | `allChanges` | `GET /v1/changes/all`, a page or every page up to `through` |
 | `search(q, owner=, agent=, repo=, branch=, harness=, agent_version=, model=, labels=, source=, since=, until=, sort=, limit=, matches=, cursor=)` | `search` | `GET /v1/search` (`labels` a dict, each sent as `label=key=value`) |
+| `search_sessions(owner=, agent=, repo=, branch=, harness=, agent_version=, model=, labels=, source=, since=, until=, limit=, after=)` | `searchSessions` | `GET /v1/search/sessions`: sessions that overlap a window (the last 7 days by default), newest first, as a `SessionList`; `since`/`until` a time or an age (`"7d"`), `after` the last page's `cursor` |
 | `me()` | `me` | `GET /v1/me` |
 | `owners(after=, limit=)` | `owners` | `GET /v1/owners` |
 | `redaction_rules()`, `redaction_rules_since(etag)` | `redactionRules`, `redactionRulesSince` | `GET /v1/redaction/rules`, as a `RedactionRules` model |
