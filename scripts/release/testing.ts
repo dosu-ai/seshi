@@ -5,8 +5,8 @@ import type { Target } from "./targets";
 
 export function standInCompile(version = repositoryVersion(), body?: string) {
   const compiled: string[] = [];
-  const compile = async (target: Target, outfile: string) => {
-    compiled.push(target.id);
+  const compile = async (target: Target, outfile: string, server = false) => {
+    compiled.push(server ? `${target.id}-server` : target.id);
     mkdirSync(dirname(outfile), { recursive: true });
     writeFileSync(outfile, `#!/bin/sh\n${body ?? `echo "seshi ${version}"`}\n# ${target.id}\n`);
     chmodSync(outfile, 0o755);

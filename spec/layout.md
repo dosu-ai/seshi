@@ -26,6 +26,8 @@ any other writer must follow the rules below.
     sources/<source_id>.json                              a source the admin API stored
     instances/<process>.json                              what one server process runs
   assembly/pending/<archive_id>                           a session with spans to assemble (X7.4)
+  search/<deployment>/                                    the shared search index (F10.9), with
+                                                          search.backend = "lance": derived
   owners/<owner>/
     .probe                                                a writer's write check
     sessions/<archive_id>/
@@ -44,6 +46,18 @@ The layout's own objects are exactly the keys named above; a reader ignores anyt
 under the prefix, and a writer never puts anything under these folders that is not. Readers
 of sessions need only `owners/`; the other folders are the server's working state, read
 through the API (X5.6).
+
+`search/` is a third kind, beside the store of record (`owners/`, `tokens/`, `seshi.json`) and
+the server's working state: **derived**. It holds the search index a server keeps there with
+`search.backend = "lance"` (F10.9): LanceDB tables (`meta.lance`, and per generation
+`<gen>/events.lance`, `sessions.lance`, `cursors.lance`, `seen.lance`, `changes.lance`), built
+from `owners/*/changes/` and the metadata and traces they name, and written only by the
+worker's indexer. Its layout is LanceDB's and the indexer's, not part of this contract: no
+reader outside seshi reads it, and it can be deleted at any time, at the cost of a rebuild
+during which search answers 503. It holds session text (redacted as stored, the
+retracted and redacted parts within `search.lance.scrub` of their removal), so the same people
+may read it as may read traces. `search.lance.uri` puts it elsewhere instead; with SQLite (the
+default) nothing is written here.
 
 ## Identifiers
 
@@ -475,8 +489,10 @@ Deleting a session deletes its span records and marker too.
 1. Write the trace object with `If-None-Match: *`; skip if the key exists (a `412` means another
    writer published the same content first). A replace writes it over an object already there
    with different bytes (see `traces` above).
-2. Verify: compare the backend's ETag to the body's MD5 when the ETag is a plain MD5
-   (single-part PUT on S3, R2, MinIO, and the folder store); otherwise read it back.
+2. Verify: an ETag equal to the body's MD5 settles it (a single-part PUT on S3, R2, MinIO, and
+   the folder store); otherwise read the object back and compare. An ETag that only looks like
+   an MD5 is not trusted to say the write failed: S3's ETag for an object under SSE-KMS or SSE-C
+   is 32 hex digits that are not the body's MD5.
 3. Append the change entry, unless the pointer already lists the trace and its object was there
    (a duplicate: nothing changes).
 4. Update `metadata.json` with `If-Match` (retrying on `412` from a fresh read). If the
@@ -503,7 +519,8 @@ A trace object that no `metadata.json` names (in `traces` or as `head`) and that
 old by the store's listing is deleted by the server's sweep (F2.5): daily, after a redaction
 backfill and after a replace. So a writer names its object within the hour of writing it, or
 writes it again; a publish that finds its object already there writes it again with its own
-bytes, and the sweep checks an object's age once more just before it deletes it.
+bytes, unless the object is under half an hour old (it then stays under the hour long enough to
+be named), and the sweep checks an object's age once more just before it deletes it.
 
 ## Reading
 
@@ -520,10 +537,11 @@ bytes, and the sweep checks an object's age once more just before it deletes it.
   `continuation` to `head`; nothing once `status` is `redacted`). Indexing from the metadata
   rather than from the entry alone makes entries read twice, out of order, early, for a change
   that failed, or missing harmless.
-  The seshi server's search index is such a reader: an SQLite file on each instance's local
-  disk, never in the bucket, derived and rebuildable (X6.1). It also keeps a copy of the
-  entries it reads, from which the server serves every owner's feed as one (`GET
-  /v1/changes/all`); nothing about it is written to the bucket.
+  The seshi server's search index is such a reader, derived and rebuildable (X6.1): by
+  default an SQLite file on each instance's local disk, never in the bucket; with
+  `search.backend = "lance"`, one index under `search/` (above), written by the worker and read
+  by every API instance. It also keeps a copy of the entries it reads, from which the server
+  serves every owner's feed as one (`GET /v1/changes/all`).
 
 `seshi store check` (`checkStore` in `@seshi/store`) reads a prefix and reports where it breaks
 the rules on this page: the marker, every pointer against its schema, its key and its traces,

@@ -29,7 +29,7 @@ function repo(): void {
   write("package.json", JSON.stringify({ name: "root", devDependencies: {} }));
   for (const name of Object.keys(PACKAGE_LAYERS)) {
     const deps = name === "model" ? [] : ["@seshi/model"];
-    unit(`packages/ts/${name}`, `@seshi/${name}`, deps);
+    unit(`packages/ts/${name}`, `@seshi/${name.split("/").pop()}`, deps);
   }
 }
 
@@ -167,6 +167,19 @@ describe("checkLayers", () => {
     expect(checkLayers(root).problems).toEqual([
       "packages/ts/extra: has no layer; add it to scripts/check-layers.ts",
       "integrations/bare: has no package.json",
+    ]);
+  });
+
+  it("treats a package nested in another's folder as its own unit, at its own layer", () => {
+    repo();
+    unit("packages/ts/search/lance", "@seshi/lance", ["@seshi/model", "@seshi/search"]);
+    write("packages/ts/search/lance/src/x.ts", 'import { s } from "@seshi/search";\n');
+    // Its files are not ts/search's: ts/search importing it reaches up a layer.
+    write("packages/ts/search/src/y.ts", 'import { l } from "@seshi/lance";\n');
+    write("packages/ts/instance/src/z.ts", 'import { l } from "@seshi/lance";\n');
+    expect(messages()).toEqual([
+      "packages/ts/instance/src/z.ts: layer 4 may import only from lower layers; packages/ts/search/lance is layer 4 (X3.2)",
+      "packages/ts/search/src/y.ts: layer 3 may import only from lower layers; packages/ts/search/lance is layer 4 (X3.2)",
     ]);
   });
 

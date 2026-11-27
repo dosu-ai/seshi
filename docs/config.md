@@ -249,13 +249,51 @@ milliseconds. Sizes are `<n><unit>` with `B`, `KB`, `MB`, `GB`, `KiB`, `MiB` or 
 | Key | Default | |
 |---|---|---|
 | `url` | required | `s3://bucket/prefix`, `r2://bucket/prefix`, `az://container/prefix` (Azure Blob Storage), `gs://bucket/prefix` (Google Cloud Storage), or `file:///path` for one machine |
-| `credentials` | | Secrets. For `s3://` and `r2://`: `access_key_id`, `secret_access_key`, `session_token`; without them the bucket client falls back to the standard `AWS_*` / `S3_*` variables (`R2_*` for `r2://`), like any S3 tool. For `az://`: `account_key` (the storage account's shared key) or `sas_token` (a shared access signature); without them, the standard Azure variables, then workload identity ([Azure Blob Storage](#azure-blob-storage-az)). For `gs://`: `service_account_key` (a service account's JSON key); without it, Application Default Credentials ([Google Cloud Storage](#google-cloud-storage-gs)). Keys for another kind of bucket are refused |
+| `credentials` | | Secrets. For `s3://` and `r2://`: `access_key_id`, `secret_access_key`, `session_token`; without them the bucket client falls back to the standard `AWS_*` / `S3_*` variables (`R2_*` for `r2://`), like any S3 tool, then, for `s3://`, the role seshi runs as: an ECS task's or the EC2 instance's ([Amazon S3](#amazon-s3-s3)). For `az://`: `account_key` (the storage account's shared key) or `sas_token` (a shared access signature); without them, the standard Azure variables, then workload identity ([Azure Blob Storage](#azure-blob-storage-az)). For `gs://`: `service_account_key` (a service account's JSON key); without it, Application Default Credentials ([Google Cloud Storage](#google-cloud-storage-gs)). Keys for another kind of bucket are refused |
 | `region` | | `s3://`. Falls back to `AWS_REGION` |
 | `endpoint` | | S3-compatible services (MinIO, Backblaze, Wasabi). Falls back to `S3_ENDPOINT`. For `az://`, the blob endpoint when it is not `https://<account>.blob.core.windows.net`: a sovereign cloud, a private endpoint, or Azurite (`http://127.0.0.1:10000/devstoreaccount1`). For `gs://`, the JSON API root when it is not `https://storage.googleapis.com` (a private endpoint); falls back to `STORAGE_EMULATOR_HOST` |
 | `account_id` | | Cloudflare account for `r2://`. Falls back to `R2_ACCOUNT_ID` |
 | `account_name` | | Azure storage account for `az://`. Falls back to `AZURE_STORAGE_ACCOUNT`, then `AZURE_STORAGE_CONNECTION_STRING`'s `AccountName` |
 | `deployment_id` | generated | This deployment's id, recorded in the layout marker `seshi.json` the first time a server uses the bucket. A server whose `deployment_id` differs from the marker's refuses to start (X1.4). Without it, the first server generates one and later servers accept whatever the marker says |
 | `org` | | The organization the deployment serves (X1.1). Recorded in the marker the first time a config names it; a server naming another org refuses to start (X1.4) |
+
+#### Amazon S3 (`s3://`)
+
+`s3://<bucket>/<prefix>` stores sessions in an S3 bucket (or an S3-compatible service, with
+`endpoint`). The bucket must exist. seshi finds its keys the way the AWS SDKs do, first match
+wins:
+
+1. `credentials` in this table.
+2. `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY`, then `AWS_ACCESS_KEY_ID` /
+   `AWS_SECRET_ACCESS_KEY` (with `S3_SESSION_TOKEN` or `AWS_SESSION_TOKEN`).
+Steps 3 and 4 apply only on AWS's own endpoints (no `endpoint`, or a host under
+`amazonaws.com`, such as a VPC endpoint): an S3-compatible service is never sent a role's keys.
+
+3. Container credentials: on ECS (Fargate or EC2), the task role's, from
+   `AWS_CONTAINER_CREDENTIALS_RELATIVE_URI`, which ECS sets; on EKS with Pod Identity, from
+   `AWS_CONTAINER_CREDENTIALS_FULL_URI` and `AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE`.
+4. EC2 instance metadata (IMDSv2): the instance profile's role, waiting a second for it to
+   answer. `AWS_EC2_METADATA_DISABLED=true` turns it off; `AWS_EC2_METADATA_SERVICE_ENDPOINT`
+   moves it. In a container on EC2 (Docker's bridge network), the instance's metadata hop
+   limit must be 2 or more, or IMDSv2 never answers.
+
+A role's keys are renewed before they expire. Give the role `s3:GetObject`, `s3:PutObject` and
+`s3:DeleteObject` on `arn:aws:s3:::<bucket>/<prefix>/*`, and `s3:ListBucket` on the bucket.
+Not supported yet: profiles in `~/.aws/config` (`AWS_PROFILE`), and EKS's IAM roles for
+service accounts (`AWS_WEB_IDENTITY_TOKEN_FILE`); give keys, or use Pod Identity. With either
+variable set and no keys, seshi refuses to start rather than use the instance's role in their
+place.
+
+With SSE-KMS or SSE-C encryption (a bucket's default, or a KMS key of your own), S3's ETag is not
+the body's MD5, so seshi checks each object it writes by reading it back: one more GET per
+write, and one more KMS request. Turn on S3 Bucket Keys for the bucket to cut the KMS requests.
+SSE-S3 (`AES256`) needs no read-back.
+
+```toml
+[store]
+url = "s3://acme-seshi/prod"
+region = "us-east-2"   # no credentials: the task's or instance's role
+```
 
 #### Azure Blob Storage (`az://`)
 
@@ -285,7 +323,8 @@ credentials = { sas_token = { env = "SESHI_SAS" } }   # or account_key; or neith
 
 A SAS token needs read, add, create, write, delete and list on the container (`sp=racwdl`), and
 must outlive the server's run: seshi does not renew it. Azure's ETags are not an MD5 of the
-body, so seshi checks each trace it writes by reading it back, which S3 spares it.
+body, so seshi checks each trace it writes by reading it back, which S3 spares it unless the
+object is encrypted with SSE-KMS or SSE-C ([Amazon S3](#amazon-s3-s3)).
 
 #### Google Cloud Storage (`gs://`)
 
@@ -528,10 +567,16 @@ skipped. An object's `x-amz-meta-seshi-<field>` metadata (`-` for `_`) wins over
 | Key | Default | |
 |---|---|---|
 | `search.enabled` | `true` | Serve `GET /v1/search` and `seshi search` from a local index built from the change feed (F10). Off: the route answers 404 `search_disabled` and no indexer runs |
-| `search.backend` | `"sqlite"` | SQLite FTS5 through Bun's built-in SQLite (F10.3) |
-| `search.path` | user cache folder | The index file on local disk: `seshi/search/<deployment>.sqlite` under `$XDG_CACHE_HOME` (else `~/.cache`) on Linux, `~/Library/Caches` on macOS, `%LOCALAPPDATA%\seshi\cache` on Windows; in the image, `/data/.cache/…`. `":memory:"` keeps it in memory (rebuilt on every start). It is derived data: deleting it only costs a rebuild |
+| `search.backend` | `"sqlite"` | `"sqlite"`: each API instance keeps its own index, SQLite FTS5 through Bun's built-in SQLite (F10.3). `"lance"`: one index in object storage, written by the worker and read by every API instance (F10.6, [search.md](search.md#a-shared-index-lancedb)); it needs the server build of seshi (the container image, or the `seshi-server-linux-*` release archives). A server setting: serverless laptops ignore it and use SQLite |
+| `search.path` | user cache folder | The SQLite index file on local disk (not read with `backend = "lance"`): `seshi/search/<deployment>.sqlite` under `$XDG_CACHE_HOME` (else `~/.cache`) on Linux, `~/Library/Caches` on macOS, `%LOCALAPPDATA%\seshi\cache` on Windows; in the image, `/data/.cache/…`. `":memory:"` keeps it in memory (rebuilt on every start). It is derived data: deleting it only costs a rebuild |
 | `search.interval` | `"15s"` | How long the indexer waits after catching up before it reads the change feed again: about how long a new session takes to become searchable |
 | `search.events` | `["user", "assistant", "tool_call"]` | Which trace events are indexed, by role: prompts, assistant text, and tool calls (names and inputs, so file paths and commands). Add `tool_result` to search tool output too (a bigger index). Changing it rebuilds the index |
+| `search.lance.uri` | `search/<deployment>/` in the store's bucket | Where the LanceDB index lives, as a store URL (`s3://`, `r2://`, `az://`, `gs://`, `file:///path`): another bucket, or a folder on a single host. Without it the index is under the store's bucket, reached with `[store]`'s keys, which LanceDB is given as options, never in the URL. With it, `[search.lance]` takes its own `credentials`, `region`, `endpoint`, `account_id` and `account_name`, as `[store]` does; a uri in the store's own bucket that names none uses `[store]`'s. A `gs://` index must be on Google's own endpoint (LanceDB cannot reach an emulator) |
+| `search.lance.read_consistency` | `"5s"` | How soon an API instance sees what the worker committed; `0` reads the bucket's latest version on every search |
+| `search.lance.optimize` | `"1h"` | How often, at most, the worker compacts the tables and adds new rows to their indexes, and only after a commit. It rewrites the indexes, so it costs more as the index grows |
+| `search.lance.scrub` | `"24h"` | How often, at most, the worker rewrites the tables so deleted, retracted and redacted text leaves the bucket (F10.12): until then it is hidden from search but still in the index's files. `seshi search --scrub` asks for one on the worker's next pass |
+| `search.lance.max_scored_rows` | `10000` | Records a relevance search scores at most. Past it, `total` is a lower bound: the response says `capped: true` and `seshi search` "at least N" |
+| `search.lance.max_recent_rows` | `100000` | Records a `sort = recent` search reads at most; past it, it searches the last day, week or month |
 | `worker.heartbeat_interval` | `"1m"` | How often the worker writes `worker/heartbeat.json` (X7.5); status calls a heartbeat older than three intervals stopped |
 | `worker.assembly_interval` | `"30s"` | How often the span assembler looks for sessions whose spans have gone quiet (F4.4, X7.4) |
 | `capture.allow_retract` | `true` | Let the machine that uploaded a session retract it with its per-session secret (F9.7). With `false`, a retraction is refused (`403 retract_disabled`) and only an admin or the owner's fresh sign-in can delete |

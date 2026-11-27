@@ -20,6 +20,12 @@ export {
   type SessionUpdate,
 } from "./backend";
 export {
+  type LanceOpener,
+  type LanceSettings,
+  lanceBackend,
+  provideLance,
+} from "./backends";
+export {
   decodeFeedCursor,
   encodeFeedCursor,
   FEED_DEFAULT_LIMIT,
@@ -49,6 +55,7 @@ export {
   parseQuery,
   SearchQueryError,
   tokensOf,
+  WORD,
 } from "./query";
 export {
   checkRequest,
@@ -57,6 +64,7 @@ export {
   MAX_LIMIT,
   MAX_MATCHES,
   MAX_OFFSET,
+  type RebuildRequested,
   SearchService,
   type SearchServiceOptions,
   type SearchSettings,

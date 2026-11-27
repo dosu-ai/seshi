@@ -1,9 +1,15 @@
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { VERSION } from "@seshi/model";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { buildCommand } from "./build-binary";
+import {
+  buildCommand,
+  checkLanceNative,
+  lanceNativeLibrary,
+  lanceNativePackage,
+  stripElf,
+} from "./build-binary";
 
 const ROOT = resolve(import.meta.dirname, "..");
 
@@ -33,6 +39,180 @@ describe("buildCommand", () => {
     expect(outfile).toBe("/repo/dist/seshi.exe");
     expect(argv).toContain("bun-windows-x64");
     expect(buildCommand({ root: "/repo", outfile: "out/x" }).outfile).toBe("/repo/out/x");
+  });
+});
+
+describe("the server build (F10.6)", () => {
+  it("starts from main-server.ts and leaves LanceDB's musl library out", () => {
+    const { argv } = buildCommand({
+      root: "/repo",
+      target: "bun-linux-x64-baseline",
+      server: true,
+    });
+    expect(argv[2]).toBe("/repo/apps/seshi/src/main-server.ts");
+    expect(argv.join(" ")).toContain("--external @lancedb/lancedb-*-musl");
+    expect(buildCommand({ root: "/repo" }).argv.join(" ")).not.toContain("lancedb");
+  });
+
+  it("names the target's LanceDB native package, and refuses one not installed", () => {
+    expect(lanceNativePackage("bun-linux-x64-baseline")).toBe("@lancedb/lancedb-linux-x64-gnu");
+    expect(lanceNativePackage("bun-linux-arm64")).toBe("@lancedb/lancedb-linux-arm64-gnu");
+    expect(lanceNativePackage("bun-darwin-arm64")).toBe("@lancedb/lancedb-darwin-arm64");
+    expect(lanceNativePackage(undefined, { platform: "linux", arch: "arm64" })).toBe(
+      "@lancedb/lancedb-linux-arm64-gnu",
+    );
+    expect(() => lanceNativePackage("bun-windows-x64")).toThrow(/Linux and macOS/);
+    // This machine's own package is what bun install put there.
+    if (process.platform !== "win32") expect(() => checkLanceNative(ROOT, undefined)).not.toThrow();
+    const other = process.arch === "arm64" ? "bun-darwin-x64" : "bun-darwin-arm64";
+    if (process.platform === "linux") {
+      expect(() => checkLanceNative(ROOT, other)).toThrow(/--os=darwin/);
+    }
+  });
+});
+
+describe("checkLanceNative, on a node_modules laid out by hand", () => {
+  const target = "bun-linux-x64-baseline";
+  const roots: string[] = [];
+  afterAll(() => {
+    for (const root of roots) rmSync(root, { recursive: true, force: true });
+  });
+  /** A fresh root each time: Bun's resolver caches the folders it has listed. Returns it and
+   * where the native package goes. */
+  const layout = (manifest: string | undefined, library = false) => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "seshi-lance-native-")));
+    roots.push(root);
+    const modules = join(root, "packages/ts/search/lance/node_modules/@lancedb");
+    mkdirSync(join(modules, "lancedb"), { recursive: true });
+    writeFileSync(join(modules, "lancedb/package.json"), '{"name":"@lancedb/lancedb"}');
+    const native = join(modules, "lancedb-linux-x64-gnu");
+    if (manifest !== undefined) {
+      mkdirSync(native);
+      writeFileSync(join(native, "package.json"), manifest);
+      if (library) writeFileSync(join(native, "lancedb.node"), "");
+    }
+    return { root, native };
+  };
+
+  it("finds the library the package names", () => {
+    const { root, native } = layout('{"main":"lancedb.node"}', true);
+    expect(lanceNativeLibrary(root, target)).toBe(join(native, "lancedb.node"));
+    expect(() => checkLanceNative(root, target)).not.toThrow();
+  });
+
+  it("says a package that is not there is not installed, and how to install it", () => {
+    const { root } = layout(undefined);
+    expect(() => checkLanceNative(root, target)).toThrow(
+      /lancedb-linux-x64-gnu is not installed.*--os=linux --cpu=x64/,
+    );
+  });
+
+  it("reports a broken package as it is, not as missing", () => {
+    const broken = layout("{ not json").root;
+    expect(() => checkLanceNative(broken, target)).toThrow(/package\.json does not parse: /);
+    expect(() => checkLanceNative(broken, target)).not.toThrow(/not installed/);
+    const noMain = layout('{"name":"@lancedb/lancedb-linux-x64-gnu"}').root;
+    expect(() => checkLanceNative(noMain, target)).toThrow(/names no library \(no "main"\)/);
+    const noFile = layout('{"main":"lancedb.node"}').root;
+    expect(() => checkLanceNative(noFile, target)).toThrow(
+      /lancedb\.node as its library, which is missing/,
+    );
+  });
+});
+
+/** A little-endian ELF64 shared object: one loaded segment holding `.text`, then the
+ * unallocated `.comment`, `.symtab`, `.shstrtab` and `.strtab` and a `.debug_info`, as a
+ * linker leaves them. */
+function elf(): Uint8Array {
+  const names = ["", ".text", ".comment", ".symtab", ".shstrtab", ".strtab", ".debug_info"];
+  const shstr = new TextEncoder().encode(`${names.join("\0")}\0`);
+  const nameAt = (i: number) => names.slice(0, i).reduce((n, s) => n + s.length + 1, 0);
+  const body: [string, number, bigint, Uint8Array, number, number][] = [
+    // name, type, flags, bytes, link, info
+    [".text", 1, 6n, new Uint8Array(64).fill(0xaa), 0, 0],
+    [".comment", 1, 0x30n, new TextEncoder().encode("rustc\0"), 0, 0],
+    [".symtab", 2, 0n, new Uint8Array(48).fill(0x11), 5, 1],
+    [".shstrtab", 3, 0n, shstr, 0, 0],
+    [".strtab", 3, 0n, new TextEncoder().encode("\0main\0"), 0, 0],
+    [".debug_info", 1, 0n, new Uint8Array(40).fill(0x22), 0, 0],
+  ];
+  const offsets: number[] = [];
+  let at = 0x40 + 56;
+  for (const [, , , bytes] of body) {
+    at = Math.ceil(at / 8) * 8;
+    offsets.push(at);
+    at += bytes.length;
+  }
+  const shoff = Math.ceil(at / 8) * 8;
+  const out = new Uint8Array(shoff + (body.length + 1) * 64);
+  const v = new DataView(out.buffer);
+  out.set([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1]);
+  v.setUint16(0x10, 3, true); // ET_DYN
+  v.setBigUint64(0x20, 0x40n, true);
+  v.setBigUint64(0x28, BigInt(shoff), true);
+  v.setUint16(0x34, 0x40, true);
+  v.setUint16(0x36, 56, true);
+  v.setUint16(0x38, 1, true);
+  v.setUint16(0x3a, 64, true);
+  v.setUint16(0x3c, body.length + 1, true);
+  v.setUint16(0x3e, 4, true);
+  // PT_LOAD over the headers and .text.
+  v.setUint32(0x40, 1, true);
+  v.setBigUint64(0x40 + 32, BigInt((offsets[0] as number) + 64), true);
+  body.forEach(([, type, flags, bytes, link, info], i) => {
+    out.set(bytes, offsets[i]);
+    const h = shoff + (i + 1) * 64;
+    v.setUint32(h, nameAt(i + 1), true);
+    v.setUint32(h + 4, type, true);
+    v.setBigUint64(h + 8, flags, true);
+    v.setBigUint64(h + 24, BigInt(offsets[i] as number), true);
+    v.setBigUint64(h + 32, BigInt(bytes.length), true);
+    v.setUint32(h + 40, link, true);
+    v.setUint32(h + 44, info, true);
+    v.setBigUint64(h + 48, 1n, true);
+  });
+  return out;
+}
+
+/** Each section's name and bytes, read back the way a loader or readelf would. */
+function sectionsOf(file: Uint8Array) {
+  const v = new DataView(file.buffer, file.byteOffset, file.byteLength);
+  const shoff = Number(v.getBigUint64(0x28, true));
+  const count = v.getUint16(0x3c, true);
+  const header = (i: number) => {
+    const h = shoff + i * 64;
+    const offset = Number(v.getBigUint64(h + 24, true));
+    return {
+      name: v.getUint32(h, true),
+      bytes: file.subarray(offset, offset + Number(v.getBigUint64(h + 32, true))),
+    };
+  };
+  const names = header(v.getUint16(0x3e, true)).bytes;
+  return Array.from({ length: count }, (_, i) => {
+    const { name, bytes } = header(i);
+    return { name: new TextDecoder().decode(names.subarray(name, names.indexOf(0, name))), bytes };
+  });
+}
+
+describe("stripElf (the server build's LanceDB library)", () => {
+  it("drops the symbol table, its strings and debug sections, and keeps the loaded bytes", () => {
+    const input = elf();
+    const output = stripElf(input) as Uint8Array;
+    expect(output.length).toBeLessThan(input.length);
+    expect(sectionsOf(output).map((s) => s.name)).toEqual(["", ".text", ".comment", ".shstrtab"]);
+    const kept = Object.fromEntries(sectionsOf(input).map((s) => [s.name, s.bytes]));
+    for (const s of sectionsOf(output)) expect(s.bytes).toEqual(kept[s.name]);
+    // Everything up to the end of the loaded segment is the same, byte for byte.
+    const loaded = 0x40 + 56 + 64;
+    expect(output.subarray(0x40, loaded)).toEqual(input.subarray(0x40, loaded));
+  });
+
+  it("leaves a stripped library and anything that is not ELF64 alone", () => {
+    expect(stripElf(stripElf(elf()) as Uint8Array)).toBeUndefined();
+    expect(stripElf(new TextEncoder().encode("#!/bin/sh\n"))).toBeUndefined();
+    const elf32 = elf();
+    elf32[4] = 1;
+    expect(stripElf(elf32)).toBeUndefined();
   });
 });
 

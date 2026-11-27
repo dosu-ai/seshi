@@ -112,6 +112,9 @@ export interface SearchResults {
   /** Sessions that match, as the index holds them (the page may hold fewer: a session whose
    * owner or visibility changed since it was indexed is left out). */
   total: number;
+  /** The index stopped counting at its cap (LanceDB's `max_scored_rows`): at least `total`
+   * sessions match. Absent when `total` is exact. */
+  capped?: true;
   results: SearchResult[];
   /** Pass as `cursor` for the next page; absent on the last. */
   cursor?: string;

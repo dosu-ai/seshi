@@ -124,9 +124,22 @@ export function loadServerlessConfig(
     ? { path: options.base.path, tree: drop(options.base.tree, options.base.path, true) }
     : undefined;
   const search = base?.tree.search;
-  if (search && typeof search === "object" && "path" in search) {
-    ignored.push(`search.path in ${base?.path}: a path on each laptop is the laptop's to set`);
-    const { path: _path, ...rest } = search as Record<string, unknown>;
+  if (search && typeof search === "object") {
+    const rest = { ...(search as Record<string, unknown>) };
+    if ("path" in rest) {
+      ignored.push(`search.path in ${base?.path}: a path on each laptop is the laptop's to set`);
+      delete rest.path;
+    }
+    // The server's index backend (F10.6): a laptop keeps its own SQLite index, limited to its
+    // scope, and never opens the server's shared one, nor needs its keys.
+    for (const key of ["backend", "lance"]) {
+      if (key in rest) {
+        ignored.push(
+          `search.${key} in ${base?.path}: a server setting; this machine keeps its own SQLite index`,
+        );
+        delete rest[key];
+      }
+    }
     (base as { tree: Record<string, unknown> }).tree.search = rest;
   }
   const file = options.file;

@@ -47,6 +47,14 @@ export const TARGETS: readonly Target[] = [
   target("windows", "arm64"),
 ];
 
+/** The server build's archive for `target` (F10.6): the same seshi with the LanceDB search
+ * backend, 180 MB (x64) to 280 MB (arm64) larger, which is why laptops' binaries do not carry it. Linux only:
+ * it is what the container image ships. Not an npm package, and not what the install scripts
+ * fetch. */
+export function serverAsset(target: Target): string | undefined {
+  return target.os === "linux" ? `seshi-server-${target.id}.tar.gz` : undefined;
+}
+
 export const CHECKSUMS = "SHA256SUMS";
 
 export const INSTALL_SCRIPTS = ["install.sh", "install.ps1"] as const;

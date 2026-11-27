@@ -79,7 +79,8 @@ describe("the built-in S3 poller", () => {
   it("reads bucket keys from the env the instance was built with", async () => {
     const instance = await buildInstance(
       config(`[[sources]]\nid = "far"\ntype = "s3"\nurl = "s3://elsewhere/x"\n`),
-      { formats, env: {} },
+      // No keys, and no role: off ECS, with instance metadata off.
+      { formats, env: { AWS_EC2_METADATA_DISABLED: "true" } },
     );
     try {
       const report = await instance.sources.run("far");

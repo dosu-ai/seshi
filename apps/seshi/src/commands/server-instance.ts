@@ -46,6 +46,9 @@ export interface OpenServerOptions {
   log?: Logger;
   claimUnmarkedBucket?: boolean;
   trustCwdConfig?: boolean;
+  /** Open a shared search index as a writer without the worker role (`seshi search
+   * --rebuild`, `--scrub`). */
+  searchWriter?: boolean;
 }
 
 export function cwdConfigHint(
@@ -95,6 +98,7 @@ export async function openServer(
     ...(options.probe ? { probe: options.probe } : {}),
     ...(options.log ? { log: options.log } : {}),
     ...(options.claimUnmarkedBucket === false ? { initialize: false } : {}),
+    ...(options.searchWriter ? { searchWriter: true } : {}),
     ...(opened ? { store: opened.store, runtime: opened.runtime } : {}),
     // A reload reads the same file, drop-ins, env and flags again (SIGHUP, POST
     // /v1/admin/reload), and the bucket's runtime config with them. A server started from

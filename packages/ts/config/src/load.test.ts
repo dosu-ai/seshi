@@ -118,6 +118,13 @@ describe("precedence (F1.1)", () => {
       backend: "sqlite",
       interval: 15_000,
       events: ["user", "assistant", "tool_call"],
+      lance: {
+        read_consistency: 5_000,
+        optimize: 3_600_000,
+        scrub: 86_400_000,
+        max_scored_rows: 10_000,
+        max_recent_rows: 100_000,
+      },
     });
     expect(config.worker).toEqual({ heartbeat_interval: 60_000, assembly_interval: 30_000 });
     expect(config.capture).toEqual({ allow_retract: true, exclude: [], redact_tool_calls: [] });

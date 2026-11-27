@@ -61,6 +61,10 @@ export interface SessionUpdate {
    * several writers (API instances, a laptop in local mode) stamp it with clocks that
    * disagree. Omitted: 0, before any stamped read. */
   read_at?: number;
+  /** A replace whose earlier text must leave the index's storage, not only its results: a
+   * redaction backfill (F2.5). It may rewrite a trace in place under the same hash, so the
+   * index cannot tell from what it deletes. */
+  scrub?: boolean;
 }
 
 /** A query as the backend runs it: the match already parsed (each backend compiles the tree),
@@ -108,6 +112,8 @@ export interface BackendHit {
 export interface BackendResults {
   total: number;
   hits: BackendHit[];
+  /** The backend stopped at its cap of scored records, so `total` is a lower bound (LanceDB). */
+  capped?: boolean;
 }
 
 /** A place in the cross-owner feed: entries sort by stamp, then owner, then name (the key
@@ -133,6 +139,11 @@ export interface IndexState {
   /** A rebuild in progress beside the live generation: the one being built, and how far it has
    * read. Never for an index that empties itself to rebuild (SQLite). */
   building?: { generation: string; read_through?: string };
+  /** The layout the live generation was written under, when it is not this code's: it is not
+   * served, and the indexer rebuilds it (LanceDB). */
+  stale_schema?: string;
+  /** Requests waiting for the indexer's next pass, with when each was made (LanceDB). */
+  requested?: { rebuild?: string; scrub?: string };
 }
 
 /** The API's side: what `SearchService.search`, `status` and `changes` call. It reads the live
@@ -173,8 +184,14 @@ export interface IndexWriter {
     owner: string,
     archives: readonly string[],
   ): Promise<Map<string, IndexedSession>>;
-  /** One feed page, written as a whole. Writing a page twice changes nothing. */
+  /** One feed page, or several of one owner's in a row, written as a whole. Writing it twice
+   * changes nothing. */
   commit(page: PageCommit): Promise<CommitResult>;
+  /** How many records (events and sessions) the indexer may gather from one owner's feed pages
+   * into one commit to `generation`; 0, or absent, to commit each page on its own. LanceDB
+   * gathers while a generation is being built, because each commit is a table version: a first
+   * build one page per commit takes hours. */
+  batchRecords?(generation: string): Promise<number>;
   /** Every owner's feed has been read after `through`, and an owner not listed then had
    * written nothing: the cross-owner feed may serve entries up to it. Never moves back. */
   readThrough(generation: string, through: string): Promise<void>;
@@ -187,6 +204,15 @@ export interface IndexWriter {
   reset(): Promise<string>;
   /** Housekeeping after a pass; nothing for SQLite. */
   maintain(signal: AbortSignal): Promise<void>;
+  /** Ask the indexer to scrub on its next pass, so deleted text leaves the storage now rather
+   * than at the next scheduled scrub (`seshi search --scrub`). Absent for a backend that
+   * deletes text when it commits (SQLite). */
+  requestScrub?(): Promise<void>;
+  /** Ask the indexer to start a rebuild on its next pass, beside the live generation (`seshi
+   * search --rebuild`), so the process asking never writes the index itself. Absent for a
+   * backend that each process rebuilds in place (SQLite). Like `requestScrub`, it works on an
+   * index opened read-only. */
+  requestRebuild?(): Promise<void>;
 }
 
 /** A removal: a tombstone, or a session no longer admitted. */
@@ -200,7 +226,9 @@ export interface Removal {
   scrub: boolean;
 }
 
-/** One page of one owner's change feed, as the indexer planned it. */
+/** One page of one owner's change feed, or several in a row (`IndexWriter.batchRecords`), as the
+ * indexer planned it: each session once, from its metadata as read after the last page that
+ * names it was listed. */
 export interface PageCommit {
   generation: string;
   owner: string;
@@ -236,10 +264,12 @@ export interface IndexOptions {
   /** The deployment the index belongs to: one built for another is wiped. */
   deployment: string;
   /** Which event roles are indexed: an index built with others is wiped (it would miss some,
-   * or hold some it should not). */
+   * or hold some it should not). LanceDB keeps answering from an index built with fewer roles
+   * while it builds the new one beside it, and stops at once for one built with more. */
   events: readonly EventRole[];
   /** What the indexer admits, named (F11.9: a serverless laptop's search scope and owner): an
-   * index built under another scope is wiped, so it holds nothing this one would leave out. */
+   * index built under another scope is wiped (LanceDB: stops answering until the new one has
+   * caught up), so it holds nothing this one would leave out. */
   scope?: string;
   /** Keep a copy of every change entry read, for the cross-owner feed. An index built without
    * it is wiped when it is turned on, so the copy starts from every feed's start. */

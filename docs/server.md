@@ -74,7 +74,7 @@ The settings most servers need ([config.md](config.md) has all of them):
 | `auth.oidc.*`, `auth.session_keys.*` | `SESHI_AUTH__OIDC__ISSUER`, `…__CLIENT_ID`, `SESHI_AUTH__SESSION_KEYS__K1` | Sign-in through your IdP (X5.2) and the key session tokens are signed with (32+ characters) |
 | `auth.org_key.enabled` | `SESHI_AUTH__ORG_KEY__ENABLED` | Default `true`: members holding the org key write as the username they state (X5.12) |
 | `store.url` | `SESHI_STORE__URL` | Required: `r2://bucket/prefix`, `s3://bucket/prefix`, `az://container/prefix` (Azure Blob Storage), `gs://bucket/prefix` (Google Cloud Storage), or `file:///path` |
-| `store.credentials.*`, `store.region`, `store.endpoint`, `store.account_id`, `store.account_name` | `SESHI_STORE__CREDENTIALS__ACCESS_KEY_ID`, `SESHI_STORE__ACCOUNT_NAME`, … | The bucket's keys and where it is. Unset, the standard `AWS_*` / `S3_*` (and `R2_*` for `r2://`) variables apply; for `az://`, `AZURE_STORAGE_*`, then workload identity ([config.md](config.md#azure-blob-storage-az)); for `gs://`, Application Default Credentials ([config.md](config.md#google-cloud-storage-gs)) |
+| `store.credentials.*`, `store.region`, `store.endpoint`, `store.account_id`, `store.account_name` | `SESHI_STORE__CREDENTIALS__ACCESS_KEY_ID`, `SESHI_STORE__ACCOUNT_NAME`, … | The bucket's keys and where it is. Unset, the standard `AWS_*` / `S3_*` (and `R2_*` for `r2://`) variables apply, then for `s3://` an ECS task's or EC2 instance's role; for `az://`, `AZURE_STORAGE_*`, then workload identity ([config.md](config.md#azure-blob-storage-az)); for `gs://`, Application Default Credentials ([config.md](config.md#google-cloud-storage-gs)) |
 | `redaction.packs` | `SESHI_REDACTION__PACKS` | Your own redaction rule packs (TOML, or today's JSON rule files), on top of the built-in pack ([redaction.md](redaction.md)). The server refuses to start on a pack it cannot use or a rule that fails its own test strings |
 | `store.deployment_id`, `store.org` | `SESHI_STORE__DEPLOYMENT_ID`, `SESHI_STORE__ORG` | Recorded in the bucket's layout marker (`seshi.json`); the server refuses to start against a bucket marked for another deployment or org (X1.4). See [the layout](../spec/layout.md) |
 | `server.listen` | `SESHI_SERVER__LISTEN` | Default `:7200`; flag `--listen` |
@@ -100,11 +100,12 @@ The worker's jobs:
 | `assembler` | `worker.assembly_interval` (30s) | Publishes sessions whose spans (OTLP, F4; Datadog, F5) have been quiet for their source's `quiet_period`, from the pending markers (X7.4); its backlog is the sessions waiting |
 | `sweep` | 1d, and when the worker starts | Deletes trace objects no session's metadata names that are over an hour old: what a redaction backfill, replace or publish that stopped partway left behind (F2.5, [redaction.md](redaction.md#trying-and-applying-rules)) |
 
-One job runs on every instance with the `api` role instead, worker or not:
+One job runs on every instance with the `api` role instead, worker or not (with
+`search.backend = "lance"`, on the worker instead):
 
 | Job | Every | What it does |
 |---|---|---|
-| `search-index` | `search.interval` (15s) | Reads every owner's change feed into this instance's own search index ([search.md](search.md#how-the-index-works)), which also keeps the copy of the feeds `GET /v1/changes/all` serves |
+| `search-index` | `search.interval` (15s) | Reads every owner's change feed into the search index ([search.md](search.md#how-the-index-works)), which also keeps the copy of the feeds `GET /v1/changes/all` serves. With SQLite, each API instance's own; with `search.backend = "lance"`, the one shared index, and only on the worker ([search.md](search.md#a-shared-index-lancedb)) |
 
 A failed run is retried after 5 seconds, doubling per failure in a row up to the job's
 interval. A poll whose envelope failed transiently (the bucket) never saves its checkpoint
@@ -114,7 +115,9 @@ cron: `seshi sync run <id>` polls a source, `seshi sync assemble` runs the span 
 `seshi sync prune` runs retention, `seshi redact sweep` runs the sweep. A deployment with no
 worker needs all four: polling alone stores OTLP and Datadog spans but never publishes their
 sessions, without `prune` drop and failure records are never removed, and without `sweep` the
-trace objects a stopped write left stay in the bucket (no reader is served them).
+trace objects a stopped write left stay in the bucket (no reader is served them). With
+`search.backend = "lance"` it needs a fifth, `seshi sync search`, which indexes the shared
+search index (a long first build spans several runs).
 
 Where the config and bucket keys are:
 
@@ -196,18 +199,19 @@ keeps the labels it was first stored with.
 
 Every release is published as a container image, `ghcr.io/dosu-ai/seshi:<version>`, built
 from `apps/seshi/Dockerfile` in this repository (`docker build -f apps/seshi/Dockerfile .` from the
-root). The image is the compiled `seshi` binary (X2.2, `bun run build`) on a slim Debian base:
-a release's image holds the very Linux binaries attached to its GitHub release
-(`--build-arg BINARY=prebuilt`, [releasing.md](releasing.md)), while a build from a checkout
-compiles its own. Outside a container, install the same binary ([install.md](install.md)) and
+root). The image is the compiled `seshi` binary (X2.2) on a slim Debian base, in its server
+build (`bun run build --server`, `apps/seshi/src/main-server.ts`), which also carries the
+LanceDB search backend (F10.6): a release's image holds the very Linux server binaries attached
+to its GitHub release (`seshi-server-linux-*`, `--build-arg BINARY=prebuilt`,
+[releasing.md](releasing.md)), while a build from a checkout compiles its own. Outside a container, install the same binary ([install.md](install.md)) and
 run `seshi serve`. The image's entry point is `seshi` and its command `serve`. It listens on `server.listen` (default
 `:7200`), reports `/healthz` for liveness (the image's health check is `seshi healthcheck`),
 and needs only the settings above, from env or a mounted `/etc/seshi/seshi.toml`: there is no
 database, no volume (unless the store is `file://`), and no state outside the bucket. API
 instances scale to many alike; the worker role wants one instance that stays up (a minimum of
 one, not scaled to zero), or run its jobs from cron with `seshi sync run <id>` for each
-polled source, `seshi sync assemble` for OTLP and Datadog sessions and `seshi sync prune` for
-retention. Keep
+polled source, `seshi sync assemble` for OTLP and Datadog sessions, `seshi sync prune` for
+retention and, with a shared search index, `seshi sync search`. Keep
 the request timeout at 120 seconds or more; a large transcript can take that long to normalize
 and verify. Platforms that cap request bodies (Cloud Run's HTTP/1 limit is 32 MiB) are fine as
 long as clients send `Content-Encoding: gzip`, which every route accepts.
@@ -216,7 +220,7 @@ Each cloud's own object storage holds the bucket:
 
 | Cloud | `store.url` | Keys |
 |---|---|---|
-| AWS | `s3://bucket/prefix` with `store.region` | An IAM role for the pod or instance through the `AWS_*` variables, or `store.credentials` |
+| AWS | `s3://bucket/prefix` with `store.region` | The ECS task role (Fargate or EC2), EKS Pod Identity, or the EC2 instance profile: seshi asks for the role's keys itself and renews them ([config.md](config.md#amazon-s3-s3)). Or `store.credentials`, or the `AWS_*` variables |
 | Google Cloud | `gs://bucket/prefix` | GKE Workload Identity: the pod's Kubernetes service account bound to a Google service account with **Storage Object User** on the bucket (seshi asks the metadata server for its token), or `store.credentials.service_account_key`, or `GOOGLE_APPLICATION_CREDENTIALS` |
 | Azure | `az://container/prefix` with `store.account_name` | Workload identity on AKS (`AZURE_FEDERATED_TOKEN_FILE`, `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, set by AKS for a service account that names a managed identity with **Storage Blob Data Contributor** on the container), or `store.credentials.account_key` / `sas_token` |
 

@@ -114,8 +114,9 @@ function flushed(stream: NodeJS.WriteStream): Promise<void> {
   return new Promise((resolve) => stream.write("", () => resolve()));
 }
 
-if (import.meta.main) {
-  // No top-level await: the compiled binary is bytecode, which needs a CommonJS-shaped entry.
+/** Run this process's command line and exit with its code: what an entry point calls. No
+ * top-level await: the compiled binary is bytecode, which needs a CommonJS-shaped entry. */
+export function start(): void {
   let settled = false;
   // Bun exits 0 when the event loop empties, even while a command still awaits something that
   // will never answer: say so, and fail, instead of reporting success with no output.
@@ -133,3 +134,5 @@ if (import.meta.main) {
     process.exit(code);
   });
 }
+
+if (import.meta.main) start();

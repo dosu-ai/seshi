@@ -61,6 +61,14 @@ export {
   type StoredSource,
   type WriteCondition,
 } from "./runtime";
+export {
+  type LanceLocation,
+  LanceMissing,
+  lanceLocation,
+  lanceUri,
+  revealedAccess,
+  searchOpener,
+} from "./search-index";
 export { SEARCH_JOB, searchIndexJobs } from "./search-job";
 export {
   assessWorker,
@@ -69,4 +77,5 @@ export {
   type JobStatus,
   SERVERLESS_BUCKET_WARNING,
   type WorkerView,
+  workerRunning,
 } from "./status";

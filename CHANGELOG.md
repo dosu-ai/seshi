@@ -1,3 +1,26 @@
+## [0.30.1](https://github.com/dosu-ai/seshi/compare/v0.30.0...v0.30.1) (2026-11-26)
+
+
+### Bug Fixes
+
+* **store:** read a write back instead of failing it when S3's ETag is not the MD5 ([#91](https://github.com/dosu-ai/seshi/issues/91)) ([da9fa4e](https://github.com/dosu-ai/seshi/commit/da9fa4e4a3e1f3a432fe76f0c6c9de75d2de115a))
+
+# [0.30.0](https://github.com/dosu-ai/seshi/compare/v0.29.0...v0.30.0) (2026-11-26)
+
+
+### Features
+
+* **store:** sign S3 requests as the ECS task's or EC2 instance's role ([#90](https://github.com/dosu-ai/seshi/issues/90)) ([16bec84](https://github.com/dosu-ai/seshi/commit/16bec840398d9aadb0f9b832e4556ff2ffa6e7df))
+
+# [0.29.0](https://github.com/dosu-ai/seshi/compare/v0.28.0...v0.29.0) (2026-11-25)
+
+
+### Features
+
+* **search:** a LanceDB index behind IndexReader and IndexWriter ([#76](https://github.com/dosu-ai/seshi/issues/76)) ([16fff97](https://github.com/dosu-ai/seshi/commit/16fff9786cc010b36a578c20b20c91ead86f4559))
+* **search:** gather a LanceDB build's feed pages into 50,000-record commits ([#78](https://github.com/dosu-ai/seshi/issues/78)) ([6714781](https://github.com/dosu-ai/seshi/commit/6714781fb5669ec725718d4496c6ef5baf92de99))
+* **search:** serve the LanceDB index from the worker and API ([#77](https://github.com/dosu-ai/seshi/issues/77)) ([2420222](https://github.com/dosu-ai/seshi/commit/2420222700b14da98b69d36ff3fcd94290daac58))
+
 # [0.28.0](https://github.com/dosu-ai/seshi/compare/v0.27.0...v0.28.0) (2026-11-25)
 
 

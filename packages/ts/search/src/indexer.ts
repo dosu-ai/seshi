@@ -162,18 +162,68 @@ function startsWith(list: readonly string[], prefix: readonly string[]): boolean
   return prefix.length <= list.length && prefix.every((h, i) => list[i] === h);
 }
 
+/** What a session's fields take from a trace. The rest of it (its records) is not kept, so a
+ * batch can hold the traces it read. */
+type TraceFacts = Pick<Trace, "started_at" | "ended_at" | "project" | "branch" | "source"> & {
+  metadata: Pick<Trace["metadata"], "git_branch" | "agent_version">;
+};
+
 interface ReadTrace {
-  trace: Trace;
+  trace: TraceFacts;
   events: IndexedEvent[];
 }
 
 interface Replaced {
   content_hash: string;
+  /** The replace removed text that must leave the index's storage (a redaction backfill). */
+  scrub: boolean;
 }
 
 type Plan =
   | { kind: "remove"; removal: Removal; metadata: SessionMetadata | null }
   | { kind: "apply"; update: SessionUpdate; metadata: SessionMetadata };
+
+/** The records a plan writes: its session's row, and its events. */
+function weight(plan: Plan): number {
+  return 1 + (plan.kind === "apply" ? plan.update.events.length : 0);
+}
+
+/** Feed pages of one owner gathered for one commit. */
+interface Batch {
+  /** The entries read, in feed order (null: unreadable or gone). */
+  entries: { key: string; entry: ChangeEntry | null }[];
+  /** One plan per session, from the last page that names it. */
+  plans: Map<string, Plan>;
+  /** What the index held of the batch's sessions before it. */
+  holds: Map<string, IndexedSession>;
+  replaced: Map<string, Replaced>;
+  /** The traces read for the batch's plans, by archive, then hash: a session planned again on
+   * a later page reads only the traces it has not read yet. During a build the index holds
+   * nothing of it, so each plan is a whole read, not an extension of the last. */
+  traces: Map<string, Map<string, ReadTrace>>;
+  records: number;
+}
+
+/** The traces `batch` has read of `archive`, by hash. */
+function tracesOf(batch: Batch, archive: string): Map<string, ReadTrace> {
+  let read = batch.traces.get(archive);
+  if (!read) {
+    read = new Map();
+    batch.traces.set(archive, read);
+  }
+  return read;
+}
+
+function newBatch(): Batch {
+  return {
+    entries: [],
+    plans: new Map(),
+    holds: new Map(),
+    replaced: new Map(),
+    traces: new Map(),
+    records: 0,
+  };
+}
 
 export class Indexer {
   private readonly store: Store;
@@ -287,12 +337,13 @@ export class Indexer {
       this.readTo = { generation, owners: new Map() };
     }
     const readTo = this.readTo.owners;
+    const gather = (await this.index.batchRecords?.(generation)) ?? 0;
     const start = this.resumeAfter === undefined ? 0 : list.indexOf(this.resumeAfter) + 1;
     this.resumeAfter = undefined;
     try {
       for (const owner of [...list.slice(start), ...list.slice(0, start)]) {
         if (signal.aborted) return run;
-        const more = await this.drain(owner, run, signal, generation, readTo);
+        const more = await this.drain(owner, run, signal, generation, readTo, gather);
         if (more) {
           this.resumeAfter = owner;
           run.more = true;
@@ -335,7 +386,10 @@ export class Indexer {
     return `${prefix}${changeStamp(new Date(Math.max(0, at - this.lagMs)).toISOString())}`;
   }
 
-  /** Reads `owner`'s feed from its cursor, one page per commit. True when the pass should stop
+  /** Reads `owner`'s feed from its cursor, one page per commit, or pages gathered until they
+   * hold `gather` records or the pass's budget of entries. The entry bound matters when pages
+   * keep naming a few long sessions: planning one again replaces its records rather than
+   * adding to them, so the records may never reach `gather`. True when the pass should stop
    * here: the budget is spent, or the index was reset. */
   private async drain(
     owner: string,
@@ -343,6 +397,7 @@ export class Indexer {
     signal: AbortSignal,
     generation: string,
     readTo: Map<string, number>,
+    gather: number,
   ): Promise<boolean> {
     const prefix = keys.changes(owner);
     const reached = (at: number | null | undefined) => {
@@ -351,7 +406,9 @@ export class Indexer {
     };
     let held = (await this.index.cursors(generation, [owner])).get(owner);
     let startAfter = held === undefined ? undefined : this.windowStart(prefix, held);
+    let batch = newBatch();
     for (;;) {
+      // An abort drops the pages gathered and not committed: the cursor has not passed them.
       if (signal.aborted) return false;
       const listedAt = this.now().getTime();
       const page = await this.store.list(prefix, { startAfter, limit: this.pageSize });
@@ -359,76 +416,123 @@ export class Indexer {
       const seen = await this.index.seen(generation, owner, listed);
       const fresh = listed.filter((k) => !seen.has(k));
       const entries = await mapLimit(fresh, CONCURRENCY, (key) => this.entry(key));
-      const named = entries.filter((e): e is ChangeEntry => e !== null && HEX64.test(e.archive_id));
-      const archives = [...new Set(named.map((e) => e.archive_id))];
-      const replaced = new Map<string, Replaced>();
-      for (const e of named) {
-        if (e.kind === "published" && e.replace === true && e.content_hash) {
-          replaced.set(e.archive_id, { content_hash: e.content_hash });
-        }
-      }
-      const holds = await this.index.sessions(generation, owner, archives);
-      const plans = await mapLimit(archives, CONCURRENCY, (a) =>
-        this.plan(owner, a, holds.get(a) ?? null, replaced.get(a)),
-      );
+      await this.gather(owner, generation, batch, fresh, entries);
       const last = page.keys.at(-1);
       const next = held === undefined || (last !== undefined && last > held) ? last : held;
       const nextAt = next === undefined ? undefined : stampTime(next.slice(prefix.length));
-      const metadata = new Map(archives.map((a, i) => [a, plans[i]?.metadata ?? null]));
-      const nowMs = this.now().getTime();
-      const done = fresh.filter((key, i) => {
-        const entry = entries[i];
-        if (!entry || !HEX64.test(entry.archive_id)) return true;
-        const at = parseChangeKey(key.slice(prefix.length))?.at ?? 0;
-        if (nowMs - at >= this.lagMs) return true;
-        return shows(metadata.get(entry.archive_id) ?? null, entry);
-      });
-      const committed = await this.index.commit({
-        generation,
-        owner,
-        ...this.planned(plans),
-        feed: this.keepFeed
-          ? fresh.flatMap((key, i) => {
-              const entry = entries[i] && this.named(entries[i], metadata, holds);
-              return entry ? [{ name: key.slice(prefix.length), entry }] : [];
-            })
-          : [],
-        seen: done.map((key) => ({ key, at: stampTime(key.slice(prefix.length)) ?? 0 })),
-        cursor: next,
-        forgetBefore: nextAt === null || nextAt === undefined ? 0 : nextAt - this.lagMs,
-      });
-      if (committed.stale) return true;
-      this.counted(run, plans, committed.refused, committed.removed);
       held = next;
-      if (committed.refused.length > 0) {
-        // Another process got to these sessions first: plan them again from what it wrote.
-        const again = await this.index.sessions(generation, owner, committed.refused);
-        const retries = await mapLimit(committed.refused, CONCURRENCY, (a) =>
-          this.plan(owner, a, again.get(a) ?? null, replaced.get(a)),
-        );
-        const retried = await this.index.commit({
-          generation,
-          owner,
-          ...this.planned(retries),
-          feed: [],
-          seen: [],
-          cursor: undefined,
-          forgetBefore: 0,
-        });
-        if (retried.stale) return true;
-        this.counted(run, retries, retried.refused, retried.removed);
-      }
-      run.entries += fresh.length;
-      if (!page.truncated || last === undefined) {
-        reached(listedAt);
-        return false;
+      const end = !page.truncated || last === undefined;
+      if (end || batch.records >= gather || batch.entries.length >= this.budget) {
+        if (await this.flush(owner, generation, run, batch, prefix, next, nextAt)) return true;
+        batch = newBatch();
+        if (end) {
+          reached(listedAt);
+          return false;
+        }
+        if (run.entries >= this.budget) {
+          reached(nextAt);
+          return true;
+        }
       }
       startAfter = last;
-      if (run.entries >= this.budget) {
-        reached(nextAt);
-        return true;
+    }
+  }
+
+  /** Adds one page to `batch`: its entries, and a plan for each session it names. A session
+   * the batch already planned is planned again, from its metadata as it is now, which is
+   * newer than the entries on this page; both plans start from what the index held before the
+   * batch, as the commit checks them against that. */
+  private async gather(
+    owner: string,
+    generation: string,
+    batch: Batch,
+    fresh: readonly string[],
+    entries: readonly (ChangeEntry | null)[],
+  ): Promise<void> {
+    const named = entries.filter((e): e is ChangeEntry => e !== null && HEX64.test(e.archive_id));
+    const archives = [...new Set(named.map((e) => e.archive_id))];
+    for (const e of named) {
+      if (e.kind === "published" && e.replace === true && e.content_hash) {
+        // A publish names a reason only for a redaction backfill (F2.5).
+        const scrub = e.reason !== undefined || batch.replaced.get(e.archive_id)?.scrub === true;
+        batch.replaced.set(e.archive_id, { content_hash: e.content_hash, scrub });
+        // A redaction backfill rewrites a trace in place, under the same hash (F2.5).
+        batch.traces.delete(e.archive_id);
       }
     }
+    const unread = archives.filter((a) => !batch.plans.has(a));
+    for (const [a, session] of await this.index.sessions(generation, owner, unread)) {
+      batch.holds.set(a, session);
+    }
+    const plans = await mapLimit(archives, CONCURRENCY, (a) =>
+      this.plan(owner, a, batch.holds.get(a) ?? null, batch.replaced.get(a), tracesOf(batch, a)),
+    );
+    archives.forEach((a, i) => {
+      const plan = plans[i] as Plan;
+      const earlier = batch.plans.get(a);
+      if (earlier) batch.records -= weight(earlier);
+      batch.plans.set(a, plan);
+      batch.records += weight(plan);
+    });
+    batch.entries.push(...fresh.map((key, i) => ({ key, entry: entries[i] ?? null })));
+  }
+
+  /** Commits `batch`, content first and the cursor (`next`) last, then plans again and commits
+   * the sessions the index refused. True when the index was reset. */
+  private async flush(
+    owner: string,
+    generation: string,
+    run: IndexerRun,
+    batch: Batch,
+    prefix: string,
+    next: string | undefined,
+    nextAt: number | null | undefined,
+  ): Promise<boolean> {
+    const plans = [...batch.plans.values()];
+    const metadata = new Map([...batch.plans].map(([a, plan]) => [a, plan.metadata]));
+    const nowMs = this.now().getTime();
+    const done = batch.entries.filter(({ key, entry }) => {
+      if (!entry || !HEX64.test(entry.archive_id)) return true;
+      const at = parseChangeKey(key.slice(prefix.length))?.at ?? 0;
+      if (nowMs - at >= this.lagMs) return true;
+      return shows(metadata.get(entry.archive_id) ?? null, entry);
+    });
+    const committed = await this.index.commit({
+      generation,
+      owner,
+      ...this.planned(plans),
+      feed: this.keepFeed
+        ? batch.entries.flatMap(({ key, entry }) => {
+            const named = entry && this.named(entry, metadata, batch.holds);
+            return named ? [{ name: key.slice(prefix.length), entry: named }] : [];
+          })
+        : [],
+      seen: done.map(({ key }) => ({ key, at: stampTime(key.slice(prefix.length)) ?? 0 })),
+      cursor: next,
+      forgetBefore: nextAt === null || nextAt === undefined ? 0 : nextAt - this.lagMs,
+    });
+    if (committed.stale) return true;
+    this.counted(run, plans, committed.refused, committed.removed);
+    run.entries += batch.entries.length;
+    if (committed.refused.length > 0) {
+      // Another process got to these sessions first: plan them again from what it wrote.
+      const again = await this.index.sessions(generation, owner, committed.refused);
+      const retries = await mapLimit(committed.refused, CONCURRENCY, (a) =>
+        this.plan(owner, a, again.get(a) ?? null, batch.replaced.get(a), tracesOf(batch, a)),
+      );
+      const retried = await this.index.commit({
+        generation,
+        owner,
+        ...this.planned(retries),
+        feed: [],
+        seen: [],
+        cursor: undefined,
+        forgetBefore: 0,
+      });
+      if (retried.stale) return true;
+      this.counted(run, retries, retried.refused, retried.removed);
+    }
+    return false;
   }
 
   private planned(plans: readonly Plan[]): { updates: SessionUpdate[]; removals: Removal[] } {
@@ -483,12 +587,14 @@ export class Indexer {
     }
   }
 
-  /** What to do with a session, from its metadata now and what the index holds of it. */
+  /** What to do with a session, from its metadata now and what the index holds of it. Traces
+   * already in `cache` are not read again; those read are added to it. */
   private async plan(
     owner: string,
     archive: string,
     held: IndexedSession | null,
-    replaced?: Replaced,
+    replaced: Replaced | undefined,
+    cache: Map<string, ReadTrace>,
     attempt = 0,
   ): Promise<Plan> {
     const { readAt, metadata } = await this.stampedMetadata(owner, archive);
@@ -502,9 +608,16 @@ export class Indexer {
     const wanted = replaced ? tracesFrom(metadata, replaced.content_hash) : currentTraces(metadata);
     const extends_ = !replaced && held !== null && startsWith(wanted, held.traces);
     const toRead = extends_ ? wanted.slice((held as IndexedSession).traces.length) : wanted;
-    const traces = await mapLimit(toRead, 4, (hash) => this.traceOf(owner, archive, hash));
+    const traces = await mapLimit(toRead, 4, async (hash) => {
+      const known = cache.get(hash);
+      if (known) return known;
+      // A trace that could not be read is not remembered: the second attempt reads it again.
+      const read = await this.traceOf(owner, archive, hash);
+      if (read) cache.set(hash, read);
+      return read;
+    });
     if (traces.some((t) => t === null) && attempt === 0) {
-      return this.plan(owner, archive, held, replaced, 1);
+      return this.plan(owner, archive, held, replaced, cache, 1);
     }
     const read = toRead
       .map((hash, i) => ({ hash, read: traces[i] ?? null }))
@@ -528,6 +641,7 @@ export class Indexer {
         replace: !extends_,
         ...(extends_ ? { base } : {}),
         read_at: readAt,
+        ...(replaced?.scrub ? { scrub: true } : {}),
       },
     };
   }
@@ -565,7 +679,18 @@ export class Indexer {
       if (!Array.isArray(trace?.events) || !Array.isArray(trace.records)) {
         throw new Error("not a trace");
       }
-      return { trace, events: searchableEvents(hash, trace, this.roles) };
+      const facts: TraceFacts = {
+        started_at: trace.started_at,
+        ended_at: trace.ended_at,
+        project: trace.project,
+        branch: trace.branch,
+        source: trace.source,
+        metadata: {
+          git_branch: trace.metadata?.git_branch,
+          agent_version: trace.metadata?.agent_version,
+        },
+      };
+      return { trace: facts, events: searchableEvents(hash, trace, this.roles) };
     } catch {
       return null;
     }
@@ -574,7 +699,7 @@ export class Indexer {
   private sessionFields(
     owner: string,
     metadata: SessionMetadata,
-    read: readonly { trace: Trace }[],
+    read: readonly { trace: TraceFacts }[],
     held: IndexedSession | null,
   ): IndexedSession {
     const starts = read.map((t) => epoch(t.trace.started_at)).filter((n) => n !== undefined);

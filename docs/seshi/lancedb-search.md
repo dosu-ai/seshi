@@ -1,6 +1,11 @@
 # A shared search index on LanceDB: design
 
-Status: proposed design. Nothing here is built. It follows the scoping work in
+Status: phases 1 to 3 are built: the seam, `LanceIndex` behind it, and its deployment (config,
+the worker and read-only API instances, the server build, the CLI, `doctor`, docs). Where the
+build found this design wrong, the text says so and what was done instead
+([prefixes](#query-semantics), [the binary](#the-binary-the-server-build),
+[phase 3](#where-phase-3-departed)).
+It follows the scoping work in
 [dosu-ai/seshi#43](https://github.com/dosu-ai/seshi/pull/43), which compared ClickHouse, LanceDB
 and DuckLake with Moraine, and ran the probes this design relies on
 ([`search-probe/`](https://github.com/dosu-ai/seshi/blob/8b7d3f9/docs/seshi/search-probe/README.md)).
@@ -28,8 +33,9 @@ instance.** SQLite stays the default and the only backend in serverless mode.
   FTS5 string. SQLite moves onto the new seam first, with no change in behaviour.
 
 The spike ([results](search-spike/README.md)) found it works at 10M records on GCS, which is
-about four months of a 50-person team: most searches answer in 0.2 to 1 s, prefixes in 2 to
-5 s. Its limit is maintenance, which rewrites the whole index and takes 8 to 9 minutes at that
+about four months of a 50-person team: most searches answer in 0.2 to 1 s. (Its prefix
+timings, 2 to 5 s, were taken on an index that missed most matches, and are unmeasured for the
+one phase 2 built; see [prefixes](#query-semantics).) Its limit is maintenance, which rewrites the whole index and takes 8 to 9 minutes at that
 size, so it fits a team up to roughly 10 to 30M records (see [risks](#risks)). The first
 version ships one table and revisits that when a team nears it ([past the limit](#past-the-limit)).
 
@@ -49,7 +55,7 @@ then deployment. See the [plan](#plan).
 | F10.9 | The index lives under `search/` in the store's bucket by default, or at `search.lance.uri`. It is derived (X6.1), holds session text, and is written only by the indexer. spec/layout.md lists it. |
 | F10.10 | A feed page is written content tables first and the cursor last: for `events`, an indexed `mergeInsert` and then a `delete` of the old rows of replaced and removed sessions; for the others, one `mergeInsert` each. Writes are idempotent, so a crash part-way is repaired by reading the page again. |
 | F10.11 | A rebuild writes a new generation beside the live one and switches when it has caught up. Search keeps answering from the old one. Only the first build answers 503. |
-| F10.12 | Retracted and redacted text is hidden at the next commit, and leaves the bucket within `search.lance.scrub` (a day by default), when the worker rewrites tables that hold deleted rows. |
+| F10.12 | Retracted and redacted text is hidden at the next commit, and leaves the bucket within `search.lance.scrub` (a day by default), when the worker rewrites `events`, `sessions` and any other table that holds deleted rows. |
 
 ## How it runs
 
@@ -77,8 +83,11 @@ then deployment. See the [plan](#plan).
   reading index metadata from the bucket.
 - `GET /v1/changes/all` is served from the index's copy of the feed, as today. Every instance
   can serve it, because the copy is in the shared index.
-- A deployment without a worker (cron-only, X7.1) runs the job from cron. Progress is in the
-  index's cursors, so a long first build spans several runs.
+- A deployment without a worker (cron-only, X7.1) runs the job from cron: `seshi sync search`,
+  one budgeted pass. It refuses while a worker's heartbeat is fresh, since `LanceIndex`
+  assumes one writer (concurrent commits conflict, and `meta.trash`'s read-modify-write would
+  lose entries). Progress is in the index's cursors, so a long first build spans several
+  runs.
 
 ## The seam
 
@@ -292,7 +301,7 @@ every row, because LanceDB has no joins.
 | `tool_name` | string, nullable | |
 | `ts` | timestamp(ms), nullable | The event's own time |
 | `text` | string | Redacted, as stored; at most `MAX_INDEXED_CHARS` (32 KiB) |
-| `text_prefix` | string | The same text, for the prefix index |
+| `text_prefix` | string | Each distinct word's first 2 to 8 letters, folded, space-separated (see [prefixes](#query-semantics)) |
 | `format`, `origin_agent` | string | Copied from the session, for `agent` |
 | `repo`, `branch`, `harness`, `agent_version`, `source_id` | string, nullable | Copied from the session |
 | `models` | list\<string\> | Copied from the session |
@@ -305,8 +314,8 @@ Indexes on `events`:
 - full text on `text`: the default `simple` tokenizer, `lowercase` and `asciiFolding` on,
   `stem: false`, `removeStopWords: false`, and **`withPosition: true`**, which phrases need and
   which 0.41.0 does not default to;
-- full text on `text_prefix`: `baseTokenizer: "ngram"`, `prefixOnly: true`, lengths 2 to 12
-  (see [prefixes](#query-semantics));
+- full text on `text_prefix`: the same `simple` tokenizer, without positions (see
+  [prefixes](#query-semantics));
 - `labelList` on `models` and `labels`; `bitmap` on `visibility`, `role` and `format`; `btree`
   on `id`, `owner`, `archive_id` and `session_updated`.
 
@@ -348,7 +357,7 @@ event counts, and `scrub_due`.
 | `-word`, `NOT word` | `NOT` | `MustNot` clause |
 | A mix of the above | | A `BooleanQuery`: the plain words as one `Must` clause of the `Operator.And` kind, then the rest |
 | Case and accents | `unicode61 remove_diacritics 2` | `lowercase` and `asciiFolding` |
-| `word*` | prefix | A candidate clause on `text_prefix`, then a check in TypeScript (below) |
+| `word*` | prefix | A clause on `text_prefix`, then a check in TypeScript (below) |
 
 A `BooleanQuery` of one `Must` clause per word gives the same matches but, at 10M records, took
 4.7 s for two common words where one `MatchQuery` with `Operator.And` took 0.5 s
@@ -361,16 +370,27 @@ queries agree. Its `simple` tokenizer splits on anything that is not a letter or
 characters (`ß`, `æ`) compare differently. The conformance suite lists them; it is not worth a
 normalizer of our own.
 
-**Prefixes.** LanceDB has no prefix query. The `text_prefix` index holds each word's first 2 to
-12 characters. A check on 24 November found it over-matches: `dep` also found `delta pepper`,
-with either operator. So the prefix clause only narrows the candidates. Each candidate's text is
-then read and checked in TypeScript against the word prefix, after the same folding. Prefixes
-must be at least 2 characters, and a prefix longer than 12 is checked in full in TypeScript.
-`"a phrase"*` uses the phrase of the complete words plus the prefix clause, and the same check.
-Prefix queries cost the most. The ngram index matches every ngram of the prefix, so about
-half the candidates fail the check (57% kept for `deplo`), and at 10M records a prefix page
-took 4.6 s with the cap at 10,000, or 2 s with a label filter. That is slow but usable for an
-occasional query; see [risks](#risks).
+**Prefixes.** LanceDB has no prefix query. This design first put the text in `text_prefix`
+under an ngram index (`prefixOnly`, lengths 2 to 12). Building phase 2 found that wrong on
+0.41.0: the ngram tokenizer takes prefixes of the whole value, not of each word, so it holds only
+the record's first word (`hello deploy` is found by `hel*` and not by `dep*`), and it does not
+honour `Operator.And` (any of the query's ngrams will do). That is why `dep` "found" `delta
+pepper` in the check on 24 November. The spike's prefix timings were taken on that index, so
+they measured a candidate set that missed most matches.
+
+Instead, the writer puts each distinct word's first 2 to 8 letters, folded (lower-cased, accents
+removed), in `text_prefix` as space-separated tokens, indexed with the plain `simple` tokenizer.
+`deplo*` is then one `MatchQuery("deplo")` on `text_prefix`, whose candidates are exactly the
+records with a word starting `deplo`. A prefix longer than 8 letters looks up its first 8. When
+the query holds a prefix, each candidate's text is read and the whole query checked in
+TypeScript, word by word after the same folding (`matchesTree`), which handles a longer prefix,
+`"a phrase"*` (the phrase of the complete words, plus the prefix clause), a prefix in an OR, and
+`-dep*`, which is never a `MustNot` clause because a shared prefix token is not a match.
+Prefixes must be at least 2 letters: `d*` is a 400 on LanceDB, where SQLite accepts it. A test
+(`lance.test.ts`) fails if a LanceDB upgrade starts indexing every word's ngram prefixes, so
+the column could go back to the ngram index. The column is larger than the text it stands for
+(about four tokens per distinct word), and prefix latency at 10M records is unmeasured; the
+spike's prefix numbers above do not apply.
 
 **Filters** are one SQL `where` string on `events`, applied before the search:
 
@@ -385,8 +405,9 @@ occasional query; see [risks](#risks).
 - since and until: `coalesce(ts, session_updated)` in the range, as today.
 
 LanceDB takes the filter as SQL text, with no bound parameters. Every value goes through one
-`sqlString()` that doubles quotes and refuses control characters, and `LIKE` values also escape
-`%` and `_`. Request values are checked before they get there (`checkRequest`), and the
+`sqlString()` (`@seshi/lance`'s `query.ts`) that doubles quotes and refuses control characters, and `LIKE`
+values also escape `\`, `%` and `_` (with `ESCAPE '\'`). Backslashes are literal in LanceDB's
+SQL strings. Request values are checked before they get there (`checkRequest`), and the
 conformance suite searches with quotes, backslashes and `%` in every filter.
 
 `SearchService` still checks each result against the session's live metadata before it returns
@@ -401,15 +422,21 @@ DuckDB for the same steps and kept TypeScript ([below](#duckdb-compared-in-the-s
    the limit is always set. At 10M records the smaller cap brought broad queries from 1.3 s
    to 0.5 s; the recent page needs the larger one because its windows (step 3) fill from it.
 2. Records are grouped by session: `best` is the top `_score`, `hits` the number of records.
-   `total` is the number of sessions. When the cap was reached, `total` is a lower bound and the
-   response says so ("at least N"). Counts are not what search is mainly for, so this is
-   accepted.
+   `total` is the number of sessions. When the cap was reached, `total` is a lower bound:
+   `BackendResults.capped` says so, and phase 3 shows it in the response ("at least N").
+   Counts are not what search is mainly for, so this is accepted.
 3. Sessions are sorted by `best` or by `session_updated`, and `offset` and `limit` applied.
    Cursors stay offsets capped at `MAX_OFFSET`. The capped records are the best-scored ones,
    which is right for relevance but not for `sort = recent`. So when a recent search reaches
    the cap, it runs again with a window on `session_updated` going back from now (a day, a
-   week, a month, then everything), and stops at the first window that fills the page without
-   reaching the cap.
+   week, a month), and stops at the first window that fills the page without reaching the cap.
+   When none does, it takes the largest window that did not reach the cap and fills the page
+   from a search of the sessions before it; when even a day reaches the cap, that day. The
+   total is still a lower bound (`capped`). A continued session's earlier rows keep their
+   older `session_updated` (rewriting a long session's rows on every continuation would cost
+   too much), so it is placed by its newest matching row. Rows with no time of their own are
+   the exception: `since` and `until` read their session's time, as SQLite does, so a
+   continuation writes those again with the new one.
 4. One read of `sessions` for the page, and one read of `events` by `id` (which has a btree
    index; without it this read took 200 ms) for the best
    `matches` records of each session, with their text, role, tool name and time. `excerpt()`
@@ -482,10 +509,27 @@ the rows up to it are written.
 Each commit makes a table version, so a page costs six or seven commits. At the default
 `search.interval` that is fine: a 50-person team adds about one record a second, and a split
 page commits about 2,500. A first build is different: a year of that team is about 32M
-records, which is three to four hours one page per commit. So during a build the indexer
-gathers pages until it holds 50,000 records and commits them together, the same steps over the
-union; plain `add()` of 100,000-row batches wrote 14,000 records a second in the spike. The
-cursor still moves only after the content. A new generation's tables get their indexes once,
+records, which is three to four hours one page per commit. So while a generation is being
+built, `IndexWriter.batchRecords` asks the indexer to gather one owner's pages until they hold
+50,000 records (events and session rows), and commit them as one `PageCommit`, the same steps
+over the union; plain `add()` of 100,000-row batches wrote 14,000 records a second in the spike.
+Each session is in a commit once: one named again on a later page is planned again from its
+metadata as read then, and both plans start from what the index held before the batch, which is
+what `commit()` checks them against. The cursor moves to the last page's end, still only after
+the content, so a crash part-way is repaired by reading the batch's pages again. Once the
+generation has caught up, each page is committed on its own, so it is searchable at once.
+SQLite never gathers: a transaction per page costs it nothing.
+
+The gathering is the indexer's, not the writer's. A writer that buffered pages would answer
+`commit()` before writing, so it could not say which updates it refused, and the indexer would
+plan the next page from `sessions()` that do not show the pages it holds. It stays within one
+owner: `cursors`, `seen` and the checks are per owner, and a build's time goes to the records,
+not to a commit per owner. A batch also ends at a pass's budget of entries (5,000), so a feed
+that keeps naming a few long sessions, whose records a new plan replaces rather than adds to,
+still commits and lets the pass stop. A session planned again on a later page reads only the
+traces it has not read yet: during a build the index holds nothing of it, so without that every
+page naming it would read all of its traces again. A page that replaces a session drops what the
+batch read of it, because a redaction backfill rewrites a trace under the same hash. A new generation's tables get their indexes once,
 when the build has caught up, instead of after every batch: at 10M records the spike wrote the
 tables in 12 minutes and built every index in 5.
 
@@ -509,10 +553,17 @@ tables in 12 minutes and built every index in 5.
   session (10 rows) from a 20,000-row table and ran `optimize()` twice: the deleted rows were
   still in the data file, hidden by a deletion file. LanceDB compacts a fragment only when
   enough of it is deleted, and 0.41.0's TypeScript API has no option to force it. So when a
-  page removes or replaces a session with `scrub: true`, the worker sets `scrub_due` in `meta`.
-  Once a day (`search.lance.scrub`), if a scrub is due, it rewrites each table that holds
-  deleted rows: it copies the live rows into a new table in the same generation, builds its
-  indexes, switches `meta` to it, and deletes the old table after the 15-minute grace. Indexing
+  page removes a session with `scrub: true`, or replaces one in a redaction backfill
+  (`SessionUpdate.scrub`, from the entry's `reason`), the worker sets `scrub_due` in `meta`.
+  The backfill needs the flag: it may rewrite a trace in place under the same hash, so the
+  page deletes nothing and `mergeInsert` updates the same rows, which leaves the old text in
+  a data file that only older table versions name, with no deleted rows to show for it. Once
+  a day (`search.lance.scrub`), if a scrub is due, the worker rewrites `events` and `sessions`
+  (always, for that reason) and any other table that holds deleted rows: it copies the live
+  rows into a new table in the same generation, builds its indexes once it is filled,
+  switches `meta` to it, and deletes the old table, with all its versions, after the
+  15-minute grace. A test checks the bytes: after the scrub and the grace, no file holds the
+  removed or redacted text. Indexing
   pauses during the scrub. On GCS the spike confirmed the problem (1,293 deleted rows before
   and after `optimize()`) and timed the scrub: 73 s at 1M records and 8 minutes at 10M, most
   of it the full-text indexes. The copy is fully indexed and compact, so a scrub also does what
@@ -536,8 +587,13 @@ needs it sooner runs `seshi search --scrub`, which asks the worker to scrub on i
    prefix is deleted after the grace.
 
 Every writer call names its generation, so a run that started before the reset writes only to
-the old one, and `commit()` returns `stale`. A new `INDEX_SCHEMA` or a change to
-`search.events` starts a rebuild the same way. A different `deployment` in `meta` is an error at
+the old one, and `commit()` returns `stale`. A new `INDEX_SCHEMA`, more `search.events` roles,
+or keeping the feed copy starts a rebuild the same way (the feed copy is served only from a
+generation that kept it). Fewer roles, or another scope, do not: the live generation holds
+records the new config leaves out (tool output after `tool_call` is dropped, say), so it stops
+answering at once. The new generation is made live from the start, searches wait for it as on
+a first build, and the old one is deleted after the grace. That is what SQLite does by wiping
+its file. A different `deployment` in `meta` is an error at
 start-up, and nothing is deleted: a shared location is not something to wipe on a config typo.
 
 **`seshi search --status`**, with a server config: the location (no credentials), the live
@@ -546,9 +602,22 @@ and how far it has read. The job's `backlog()` reports the same, so `seshi worke
 `GET /v1/admin/jobs` show it.
 
 **`seshi search --rebuild`**, with a server config: with SQLite it rebuilds this instance's
-file, as today. With LanceDB it writes `building_gen` and returns; the worker does the build,
-so there is never a second writer and the build survives the CLI exiting. `--wait` follows
-`--status` until the switch.
+file, as today. With LanceDB it writes one key, `rebuild_requested`, to `meta` and returns:
+the CLI opens the index read-only, and only the worker ever calls `reset()`, in `maintain()`
+after its next pass, so there is never a second writer and the build survives the CLI
+exiting. **`seshi search --scrub`** writes `scrub_requested` the same way. A worker clears a
+request only while it still holds the value it acted on, so one made while it works stays for
+the next pass. `--status` lists requests waiting. `--wait` follows the request, the build and
+the switch; when nothing has moved for 15 minutes (or 20 indexer intervals) and no worker's
+heartbeat is fresh, it gives up and points to `seshi workers status` and `seshi sync search`.
+
+A first draft of phase 3 had the CLI open a full writer and call `reset()` itself. Review
+found that this could delete the live index: `reset()` put the generation being built in the
+trash while the worker's `passDone()` was still building its text indexes (minutes, at scale),
+which then made that generation live, and the grace dropped it. Besides the request, two
+guards stay: `passDone()` reads `meta` again before it switches and never makes live a
+generation in the trash, and `emptyTrash()` never drops the live generation or a table `meta`
+names.
 
 ## Config and deployment
 
@@ -570,24 +639,168 @@ max_recent_rows = 100000        # sort = recent
 # secrets as { env } or { file }.
 ```
 
-- `backend` already exists as `z.enum(["sqlite"])` in `config/src/server/search.ts`. It gains
-  `"lance"`, and `searchSection` gains `lance`. `path` is ignored for LanceDB, and the config
-  check says so.
+- `backend` is `z.enum(["sqlite", "lance"])` in `config/src/server/search.ts`, and
+  `searchSection` has `lance` (`lanceSection`). `path` is ignored for LanceDB, and the config
+  check warns. `[search.lance]` refuses keys and endpoints without a `uri` (the default
+  location uses `[store]`'s), and keys of the wrong kind for the uri's scheme. The keys reach
+  LanceDB as `storageOptions` (`lanceLocation()` in `@seshi/instance`), with the same
+  environment fallbacks as the store (`S3_*`, `AWS_*`, `R2_*`, `AZURE_STORAGE_*`).
 - **Server-only.** In serverless mode, laptops ignore `search.backend` and `[search.lance]` in
   the shared config, as they ignore `search.path`. Each laptop's index is limited to its own
-  scope (F11.9), and laptops must not write a shared index.
-- **Dependencies.** `@lancedb/lancedb` and `apache-arrow`, pinned exactly, as server-only
-  dependencies of `@seshi/search`, imported lazily by `lanceIndex()`. The hook's import check
-  (X3.3) keeps them off the capture path. The native binary is 205 MB on linux-x64 with glibc
-  and 171 MB with musl (about 250 MB on macOS arm64); the image installs only its own one.
-  LanceDB's optional embedding dependencies (`onnxruntime-node`, 180 MB) are left out. DuckDB
-  is not a dependency of this design.
+  scope (F11.9), and laptops must not write a shared index. (Serverless mode builds its own
+  SQLite `SearchService`, so it never reads `search.backend`.)
+- **Dependencies.** `@lancedb/lancedb` 0.41.0 and `apache-arrow` 21.2.0, pinned exactly, as
+  dependencies of **`@seshi/lance`** (`packages/ts/search/lance`, layer 4), the only package
+  that depends on them; `@seshi/search` does not. `lanceIndex()` imports them lazily, only the
+  server build's entry imports `@seshi/lance`, the layer check refuses it to anything below the
+  app, and the hook's import check (X3.3) keeps it and them off the capture path. The native library is 205 MB on linux-x64 with glibc
+  and 171 MB with musl (250 MB on macOS arm64). DuckDB is not a dependency of this design.
+- **The binary.** See [below](#the-binary-the-server-build): a server build carries LanceDB,
+  and laptops' binaries do not.
+- **Installs.** LanceDB lists optional embedding packages (`@huggingface/transformers` and
+  `openai`, and through transformers `onnxruntime-node`, `onnxruntime-web` and `sharp`: about
+  420 MB) that seshi never imports. The root `package.json`'s `overrides` point both at an
+  empty stand-in (`packages/ts/search/lance/no-embeddings`), so no install (laptops' checkouts,
+  CI, the image's build stage) fetches them. A Bun patch to LanceDB's `package.json` does not
+  work: Bun resolves dependencies from the registry's metadata in `bun.lock`, not from the
+  patched file. `--omit optional` does not either: LanceDB's native libraries are optional
+  dependencies too. No release channel installs the workspace, so users never fetched them;
+  this is for contributors, CI and the image build.
 - **Platforms.** The spike ran on linux-x64 under Bun 1.4.2, against GCS with the VM's metadata
-  credentials. S3 is covered by the conformance suite against rustfs; linux-arm64 and Azure are
-  not checked yet.
-- **`seshi doctor`** with a server config checks that the location is reachable and writable by
-  the worker, that `meta` names this deployment and schema, and how old `caught_up_at` is. It
-  warns when `events` holds more than 20M records ([risks](#risks)).
+  credentials. The conformance suite and the deploy test run on a local folder in every CI run
+  (linux-x64) and on macOS arm64, against S3 on rustfs 1.0.5 and against Azure on Azurite 3.38
+  (CI's services, and locally). The images and the Linux server binaries are checked on
+  linux-arm64 too.
+- **GCS.** LanceDB's GCS client has no endpoint option, and cannot write to fake-gcs-server
+  (1.49 to 1.56 all answer its uploads `400 invalid uploadType`; checked on 25 November 2026),
+  so the GCS variants of both suites run only against a real bucket (`SESHI_TEST_GCS_BUCKET`
+  with Application Default Credentials, no emulator), not in CI. A `gs://` index beside a
+  `[store] endpoint` that is not Google's, or `STORAGE_EMULATOR_HOST`, is refused, since the
+  index would otherwise go to Google while the store goes elsewhere. Without a key LanceDB
+  finds Application Default Credentials itself, as the store does; with
+  `service_account_key` it is passed on as `google_service_account_key`.
+- **Azure** reuses the store's own resolution (`resolveAzureAccess`): config, then
+  `AZURE_STORAGE_ACCOUNT`, `AZURE_STORAGE_KEY`, `AZURE_STORAGE_SAS_TOKEN` and the connection
+  string, then workload identity, whose variables are passed on for LanceDB's client to
+  exchange the federated token itself.
+- **`seshi doctor --config <seshi.toml>`** (a new mode: `doctor` was a laptop's check until
+  phase 3) checks that the index can be read (a `meta` naming another deployment fails here,
+  with LanceDB's error), that the worker's keys can write the location (a probe object written
+  and deleted through the store client with the same keys), whether the live generation was
+  written under another schema, and how old `caught_up_at` is. It warns when `events` holds
+  more than 20M records ([risks](#risks)).
+
+### The binary: the server build
+
+`bun build --compile` bundles every module an entry's imports name, LanceDB's native library
+included. Phase 2 kept `lanceIndex()` out of the app (as `@seshi/search/lance`). Phase 3 moved
+it to its own package, `@seshi/lance`, and chose a
+**server build**: `apps/seshi/src/main-server.ts` imports `@seshi/lance`, registers it
+(`provideLance()`), and runs the same `main()`. Nothing `main.ts` reaches imports it, so every
+binary built from `main.ts` is as before. `scripts/build-binary.ts --server` builds it, with
+`--external @lancedb/lancedb-*-musl`: LanceDB picks its library by libc at run time, which the
+bundler cannot decide, so it would otherwise carry the musl one too (172 MB more on x64).
+It also refuses to build when the target's native package is not installed (`bun install
+--os --cpu`), rather than ship a server with no LanceDB.
+
+It ships two ways, and the laptop channels (install scripts, npm) do not change:
+
+- **The image** (`apps/seshi/Dockerfile`): the build stage installs with `--os=linux
+  --cpu=<target>` and compiles with `--server`. A release's image takes the release's own
+  `seshi-server-linux-x64` and `-arm64` archives, checked against `SHA256SUMS`, as it took the
+  plain Linux archives before, so the image still ships exactly what the release published
+  (X2.2).
+- **The release** gains those two archives (`scripts/release/build.ts`, Linux only); the
+  release job installs with `--cpu='*'` so both find their native package.
+
+A binary without LanceDB refuses `backend = "lance"` when the instance is built
+(`LanceMissing`: "needs the server build of seshi…").
+
+The other option was loading LanceDB at run time from beside the binary (with
+`NAPI_RS_NATIVE_LIBRARY_PATH` for the native library, and `lance.ts` and `apache-arrow` as an
+external bundle). It keeps one binary, but splits the server across files the image must keep in
+step, and adds a load path no test of the compiled binary exercises; the server build is one
+more entry point through the existing build.
+
+**Stripping LanceDB's library.** LanceDB publishes its Linux libraries unstripped: on
+linux-arm64 the symbol table (`.symtab` and `.strtab`, which `dlopen` never reads; it uses
+`.dynsym`) is 145 of the library's 426 MB, on linux-x64 36 of 215 MB. The server build strips
+the target's library before compiling (`stripLanceNative` in `scripts/build-binary.ts`, which
+`--server` and `scripts/release/build.ts` both call), so the Dockerfile's build stage, the
+`binaries` job and the release job all embed the stripped one. It drops the symbol table, its
+strings and any `.debug*` section and copies every loaded segment byte for byte; it is a few
+lines of TypeScript rather than `strip`, because the release job builds the arm64 server on an
+x64 runner (and a developer may build both on a Mac), where no `strip` reads the other
+architecture's ELF. Its output has the sections, segments and dynamic symbols of `strip
+--strip-all`'s, within 24 bytes of its size (`strip` also trims the section-name table). The
+file is replaced where `bun install` put it, by a rename (Bun's cache, which node_modules may
+hard-link, is untouched); the bundler has no hook to embed a different file, and a stripped
+library runs the same, so a second build finds nothing to do.
+
+What stripping costs: **a backtrace from inside LanceDB has no function names.** `.dynsym`
+names only the N-API entry points LanceDB exports, so a Rust panic or a crash in the server
+build shows LanceDB's frames as `<unknown>`, `??`, or the nearest exported name, which is
+wrong. Nothing is kept to undo that, because nothing needs to be: the stripped file's loaded
+bytes are the published ones, so the unstripped library on npm, at the version `bun.lock`
+pins, is the symbol file. Take a frame's offset into the library (its address minus the
+library's load address in `/proc/<pid>/maps`; `RUST_BACKTRACE=full` prints addresses) and look
+it up there, for example `addr2line -f -C -e lancedb.linux-arm64-gnu.node <offset>`. Checked on
+both architectures: an offset the stripped file names wrongly or not at all resolves to
+LanceDB's Rust function in npm's file. The arm64 library also has a GNU build ID, which
+stripping keeps; the x64 one has none, so the version is how to find its file. A CI artifact
+of the unstripped library or a `.gnu_debuglink` would add a copy of what npm already keeps.
+
+The rest of the gap between the architectures is how LanceDB builds them (`npm-publish.yml` at
+0.41): linux-x64 with fat LTO and one codegen unit, linux-arm64 with thin LTO and 16, because
+fat LTO ran out of memory on a 32 GiB runner. Stripped, the arm64 library is still 281 MB
+against 179 MB on x64 (443,759 functions in its symbol table against 143,487). Building it from
+source with fat LTO would likely bring it near x64's size, about 100 MB less again, but takes
+a runner with more than 32 GiB of memory and well over an hour per release, so it is a proposal,
+not done. Asking LanceDB to strip its release libraries (`strip = "symbols"`) would make the
+step above unnecessary.
+
+Two other ways were measured or ruled out. Bun cannot compress what `--compile` embeds (its
+only related flag, `--asset`, embeds files as they are). Shipping the library beside the binary
+(`NAPI_RS_NATIVE_LIBRARY_PATH`) moves the bytes to another layer without removing any, so it
+does not shrink the image, and it brings back the split the server build avoided.
+
+Measured on 25 November 2026, macOS arm64 host, Bun 1.4.2 (what releases use) unless noted:
+
+| | macOS arm64 | linux-x64 | linux-arm64 |
+|---|---|---|---|
+| `seshi` (laptops; unchanged but for 50 KB of phase 3 code) | 71.9 MB | 91.0 MB (41.0 MB gz) | 90.9 MB (41.0 MB gz) |
+| `seshi` server build, LanceDB unstripped | 339.9 MB | 308.9 MB (119.4 MB gz) | 519.8 MB (166.0 MB gz) |
+| `seshi` server build, stripped | (not stripped) | 273.0 MB (114.9 MB gz) | 374.9 MB (147.4 MB gz) |
+| Image, before (plain binary) | | 203 MB | 225 MB |
+| Image, server build, unstripped | | 420 MB (181 MB gz) | 654 MB (230 MB gz) |
+| Image, server build, stripped | | 384 MB (176 MB gz) | 509 MB (208 MB gz) |
+
+The images were built with `docker build` from the Dockerfile, whose `oven/bun:1.4-slim` stage
+was Bun 1.4.5 that day: its binaries are larger than 1.4.2's (118.4 MB plain; 336.3 MB and
+547.2 MB server unstripped, 300.3 MB and 402.3 MB stripped). An image's gz is `docker save`
+through `gzip -1`, about what a pull transfers. A symbol table compresses well, so stripping
+saves far more on disk than in a download: 36 and 145 MB on disk, 5 and 22 MB pulled. So the
+server build adds 181 MB to the amd64 image and 284 MB to the arm64 one. Both images were
+checked: `backend = "lance"` builds and serves an index on `/data`, and `seshi doctor --set
+search.backend=lance` passes, on arm64 natively and on amd64 under emulation; the stripped
+server binaries also indexed an uploaded session and found it with `seshi search`.
+
+### Where phase 3 departed
+
+- **The image grows by 181 MB on amd64 and 284 MB on arm64** (above), not "about 205 MB": 218
+  and 430 MB until the server build stripped LanceDB's library.
+- **`doctor` had no server mode.** The design assumed `seshi doctor` with a server config;
+  `doctor` only checked a laptop's sessions. Phase 3 added `seshi doctor --config`.
+- **`seshi sync search`** is new: the design said a cron-only deployment "runs the job from
+  cron" but named no command.
+- **`--rebuild` and `--scrub` are requests the worker carries out** (`rebuild_requested`,
+  `scrub_requested` in `meta`), not writes from the CLI; see [rebuild](#rebuild) for the race
+  that a writer in the CLI caused.
+- **LanceDB is its own package**, `@seshi/lance` at `packages/ts/search/lance`, so
+  `@seshi/search` no longer depends on LanceDB or Arrow, and LanceDB's embedding packages are
+  overridden away (see Installs above).
+- **API responses** carry `capped: true` when the total is a lower bound, and the CLI prints
+  "at least N".
 
 **Tests.**
 
@@ -678,13 +891,17 @@ guess in the scoping PR.
   team's year is out of reach. So this design fits an `events` table up to roughly 10 to 30M
   records, and `seshi doctor` warns above 20M. The first version ships one `events` table, and
   the limit is revisited when a deployment nears it; see [past the limit](#past-the-limit).
-- **Prefix queries are slow** at 10M records: 2 to 5 s ([query semantics](#query-semantics)).
-  If that is too slow, raise the minimum length to 3, or limit prefixes to `sort = recent`,
-  whose windows keep the candidates few (under 1 s in the spike).
+- **Prefix queries may be slow** at 10M records: the spike's 2 to 5 s was measured on the
+  ngram index phase 2 replaced, and the word-prefix column is unmeasured at that size ([query
+  semantics](#query-semantics)). Its candidates are exact, so it should do no worse; if it is
+  too slow, raise the minimum length to 3, or limit prefixes to `sort = recent`, whose windows
+  keep the candidates few. The column also makes `events` larger than the design assumed.
 - **Cold reads from object storage.** On GCS the first query on a new connection took 1 to
   3 s, so instances keep their tables open. Each search reads from the bucket (100 to 250 ms
   for a rare word), and each read is a billed request.
-- **Image size.** About 205 MB more in the server image (linux-x64, glibc).
+- **Image size.** About 181 MB more in the amd64 image and 284 MB more in the arm64 one, with
+  LanceDB's library stripped ([the binary](#the-binary-the-server-build)); laptops' binaries
+  carry none of it. A fat-LTO arm64 build of LanceDB would likely save about 100 MB more.
 - **SQL text in filters.** No bound parameters, so escaping is the only defence. One function
   does it, and the suite tests it with hostile values.
 
@@ -723,8 +940,8 @@ grouping searches is settled: [TypeScript](#duckdb-compared-in-the-spike).
 |---|---|---|
 | 0. Spike | Done, 24–25 November ([results](search-spike/README.md)): latency at 1M and 10M records on GCS, TypeScript against DuckDB for grouping, prefix checks, commit, `optimize()` and scrub times, and the image size. | Done |
 | 1. Seam | `IndexReader` and `IndexWriter`, `drain()` onto `commit()`, `MatchTree`, `state()`, `IndexUnavailable`, the `OpenIndex` factory, `SearchStatus.location`, `excerpt()`. SQLite only, with no change in behaviour; existing tests keep their assertions. | 4–6 days |
-| 2. Backend | `LanceIndex`: tables and `meta`, `commit()`, the query compiler, filters and escaping, grouping, prefixes, `maintain()` with the scrub, generations. The conformance suite on folder and S3, and the crash tests. | 1.5 weeks |
-| 3. Deploy | The config schema, `worker` placement for this backend, `--status`, `--rebuild`, `--wait` and `--scrub`, `doctor` checks, spec/layout.md's `search/` entry, and docs (`docs/search.md`, `docs/config.md`, F10.6–F10.12 in `design-decisions.html`). | 1 week |
+| 2. Backend | Done: `LanceIndex` (`lance.ts`, `lance-query.ts`, `lanceIndex()` as `@seshi/search/lance`; phase 3 moved them to `@seshi/lance`): tables and `meta`, `commit()`, the query compiler, filters and escaping, grouping, prefixes, `maintain()` with the scrub, generations. The conformance suite on SQLite, a folder and S3, and the crash tests. While a generation is being built, its tables are optimized every 100,000 committed rows, so the scalar indexes `mergeInsert`, `delete` and the lookups use keep up. A build gathers each owner's pages into commits of 50,000 records (`IndexWriter.batchRecords`; see [ingest](#ingest)). | 1.5 weeks |
+| 3. Deploy | Done: the config schema (`[search.lance]`, with `storageOptions` from `[store]` or its own keys), `worker` placement for this backend and `readOnly` for API instances, the server build ([the binary](#the-binary-the-server-build)), `capped` ("at least N"), `--status`, `--rebuild`, `--wait` and `--scrub`, `seshi sync search`, `seshi doctor --config`, spec/layout.md's `search/` entry, and docs. An end-to-end test runs a worker process from `main-server.ts` and a read-only API instance on a folder and on S3. | 1 week |
 | Later | `llm_calls` and DuckDB analytics; semantic search. | Separate decisions |
 
 Phase 1 is worth doing on its own: it makes the indexer's writes explicit and removes the
