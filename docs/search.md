@@ -231,10 +231,19 @@ new one. An index kept in memory (`search.path = ":memory:"`) has no file for a 
 
 On a LanceDB index the workers run DuckDB, which reads the live generation's `sessions`,
 `events` and `llm_calls` tables straight from the bucket. DuckDB and its `lance` extension
-(about 400 MB on linux-x64) ship only in the `seshi-server-sql` build of the server: the plain
-server build answers search but `sql` with `501 sql_unavailable`, naming that build, and so does
-a `-sql` build whose workers cannot load the extension (`search.sql.extensions` names its folder;
-by default `duckdb/` beside the binary, where the archive and the image put it).
+(about 400 MB more on linux-x64) ship only in the `seshi-server-sql` build of the server: the
+`-sql` image, `ghcr.io/dosu-ai/seshi:<version>-sql` (and `latest-sql`), and the
+`seshi-server-sql-linux-x64` and `-arm64` release archives. The plain server build answers
+search but `sql` with `501 sql_unavailable`, naming that build, and so does a `-sql` build whose
+workers cannot load the extension.
+
+The `-sql` archive holds the binary and, beside it, `duckdb/lib/libduckdb.so` (DuckDB's own
+library, which the binary loads from there) and `duckdb/<version>/<platform>/lance.duckdb_extension`;
+the image unpacks it to `/opt/seshi/`. Keep them together. `search.sql.extensions` names another
+folder for the extension, laid out the same way (`<folder>/v2.0.1/linux_amd64/…`). The release
+takes the extension from extensions.duckdb.org and checks it against the SHA-256 that
+`scripts/duckdb-extensions.json` pins; DuckDB checks its signature when it loads it, and loads
+nothing else: autoloading, community and unsigned extensions are off.
 
 For each statement a worker takes a fresh in-memory DuckDB database, which it opened and warmed
 while idle (`lance` loaded from the extension folder; autoloading, community and unsigned
@@ -285,6 +294,13 @@ credential, which can write, and the server warns at start-up; where that creden
 machine's (Application Default Credentials, an instance role), the workers' secret is
 `PROVIDER credential_chain`, which leaves it to Lance's own object-store client.
 
+**Checking it.** `seshi doctor --config <seshi.toml>` runs `SELECT count(*) FROM sessions` in a
+worker of its own, which loads DuckDB and its `lance` extension and reads the index with the
+workers' credential, then tries to write a small file where the index lives with
+`[search.sql.storage]` alone. It fails when the extension does not load, the workers cannot
+read, or that credential can write; it warns when there is none. `seshi search --status`
+says which engine answers `sql` and which credential its workers hold.
+
 **Scope on LanceDB.** `events` and `llm_calls` hold the rows of the sessions `sessions` admits,
 and `events` also checks each row's own visibility, so a session turned owner-only leaves a
 member's view at the commit that carries it, whichever table the indexer wrote first. `sql`
@@ -301,7 +317,7 @@ not seen.
 | `400 bad_field` | The body: an unknown field, a window that is not one or longer than 400 days |
 | `403 forbidden` | No `sql` scope |
 | `429 sql_busy` | Two of the caller's statements are running, or eight are waiting |
-| `501 sql_unavailable` | A LanceDB index on a server without DuckDB (not the `seshi-server-sql` build, or its `lance` extension missing), or a SQLite index in memory |
+| `501 sql_unavailable` | A LanceDB index on a server without DuckDB (not the `seshi-server-sql` build or the `-sql` image, or its `lance` extension missing), or a SQLite index in memory |
 | `503 index_unavailable` | The index has not caught up with the change feed yet |
 
 `seshi sql` exits 0 with an answer, 1 when the worker running it failed, 2 for a statement
@@ -466,4 +482,4 @@ keys), the live generation, when it was ready and last caught up, a rebuild in p
 a scrub that failed; `seshi workers status` and `GET /v1/admin/jobs` show the job's `building`
 flag and `scrub_failures`. `seshi doctor --config <seshi.toml>` checks that the index can be
 read, that the worker's keys can write its location, that it caught up recently, that the last
-scrub did not fail, and its size.
+scrub did not fail, and its size; and `sql` ([below](#sql-on-a-lancedb-index)).

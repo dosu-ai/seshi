@@ -203,7 +203,10 @@ root). The image is the compiled `seshi` binary (X2.2) on a slim Debian base, in
 build (`bun run build --server`, `apps/seshi/src/main-server.ts`), which also carries the
 LanceDB search backend (F10.6): a release's image holds the very Linux server binaries attached
 to its GitHub release (`seshi-server-linux-*`, `--build-arg BINARY=prebuilt`,
-[releasing.md](releasing.md)), while a build from a checkout compiles its own. Outside a container, install the same binary ([install.md](install.md)) and
+[releasing.md](releasing.md)), while a build from a checkout compiles its own. The `-sql` image,
+`ghcr.io/dosu-ai/seshi:<version>-sql`, is the same server with DuckDB too, for `sql` on a
+LanceDB index ([search.md](search.md#sql-on-a-lancedb-index)); it is about 400 MB larger, so
+the default image leaves it out (`--build-arg VARIANT=sql` builds it). Outside a container, install the same binary ([install.md](install.md)) and
 run `seshi serve`. The image's entry point is `seshi` and its command `serve`. It listens on `server.listen` (default
 `:7200`), reports `/healthz` for liveness (the image's health check is `seshi healthcheck`),
 and needs only the settings above, from env or a mounted `/etc/seshi/seshi.toml`: there is no

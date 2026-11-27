@@ -32,6 +32,7 @@ from any other branch, and nothing is published by hand.
    | `seshi-<os>-<cpu>.tar.gz` | macOS and Linux: `seshi` and `LICENSE` |
    | `seshi-windows-<cpu>.zip` | Windows: `seshi.exe` and `LICENSE` |
    | `seshi-server-linux-<cpu>.tar.gz` | The server build for Linux (x64, arm64): the same `seshi` with the LanceDB search backend (F10.6), what the image ships. Not on npm, and not what the install scripts fetch |
+   | `seshi-server-sql-linux-<cpu>.tar.gz` | The `-sql` server build for Linux: the server build with DuckDB, for `sql` on a LanceDB index, with DuckDB's library and its `lance` extension in `duckdb/` beside the binary, what the `-sql` image ships. The extension comes from extensions.duckdb.org, checked against `scripts/duckdb-extensions.json`; bumping `@duckdb/node-api` needs new pins there, and the build refuses a DuckDB version it has none for |
    | `install.sh`, `install.ps1` | The install scripts (stable at `…/releases/latest/download/`) |
    | `SHA256SUMS` | `sha256sum` format, over every asset above |
 
@@ -44,7 +45,9 @@ from any other branch, and nothing is published by hand.
    the job can be re-run. Prereleases go under the `next` tag.
 4. **`image`** downloads the two Linux server archives, checks them, and builds
    `ghcr.io/<repo>` for linux/amd64 and linux/arm64 from those binaries
-   (`--build-arg BINARY=prebuilt`), tagged `X.Y.Z`, `X.Y` and `latest`.
+   (`--build-arg BINARY=prebuilt`), tagged `X.Y.Z`, `X.Y` and `latest`. From the two
+   `seshi-server-sql-linux-*` archives it builds the `-sql` image the same way
+   (`--build-arg VARIANT=sql`), tagged `X.Y.Z-sql`, `X.Y-sql` and `latest-sql`.
 5. **`pypi`** builds the Python client from the release's tag and publishes it to PyPI as
    `seshi` ([below](#pypi)).
 6. **`verify`** installs the published release on all six platforms with `install.sh` or

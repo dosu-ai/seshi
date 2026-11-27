@@ -55,6 +55,14 @@ export function serverAsset(target: Target): string | undefined {
   return target.os === "linux" ? `seshi-server-${target.id}.tar.gz` : undefined;
 }
 
+/** The `-sql` server build's archive for `target`: the server build with DuckDB, for `sql` on a
+ * LanceDB index (docs/search.md), with DuckDB's library and its `lance` extension in `duckdb/`
+ * beside the binary, about 500 MB more unpacked. Linux only, like the server build: it is what
+ * the `-sql` image ships. */
+export function serverSqlAsset(target: Target): string | undefined {
+  return target.os === "linux" ? `seshi-server-sql-${target.id}.tar.gz` : undefined;
+}
+
 export const CHECKSUMS = "SHA256SUMS";
 
 export const INSTALL_SCRIPTS = ["install.sh", "install.ps1"] as const;

@@ -203,6 +203,31 @@ jobs:
           done
           docker logs seshi-lance
           exit 1
+      # The -sql image (VARIANT=sql): DuckDB's library and its lance extension, fetched and
+      # checked against scripts/duckdb-extensions.json, beside the binary in /opt/seshi/. sql
+      # answers over the LanceDB index, and seshi doctor's sql checks pass.
+      - run: docker build -f apps/seshi/Dockerfile --build-arg VARIANT=sql -t seshi-sql-smoke .
+      - name: sql on a LanceDB index in the -sql image
+        run: |
+          docker run -d --name seshi-sql -p 7202:7200 \
+            -e SESHI_AUTH__TOKENS__CI=ci-token-0123456789abcdef -e SESHI_STORE__URL=file:///data \
+            -e SESHI_SEARCH__BACKEND=lance -e SESHI_SEARCH__INTERVAL=1s seshi-sql-smoke
+          for i in $(seq 1 30); do
+            if docker exec seshi-sql seshi search --status --json 2>/dev/null | grep -q '"ready": true'; then
+              docker exec seshi-sql seshi sql 'SELECT count(*) AS sessions FROM sessions'
+              docker exec seshi-sql seshi doctor --set search.backend=lance --json > doctor.json
+              jq -e '.server[] | select(.id == "sql") | .status == "ok"' doctor.json || { cat doctor.json; exit 1; }
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs seshi-sql
+          exit 1
+      - name: The default image carries no DuckDB
+        run: |
+          docker run --rm --entrypoint sh seshi-smoke -c 'test ! -e /opt/seshi/duckdb'
+          docker image ls seshi-smoke
+          docker image ls seshi-sql-smoke
 
   # F8.4: the binary on every platform it ships for, built natively on that platform's runner.
   # Each one is put through scripts/release/smoke.ts: serve, admin init, login with the org key
@@ -231,6 +256,13 @@ jobs:
         with:
           bun-version-file: .bun-version
       - run: bun install --frozen-lockfile
+      # The -sql build's lance extension (about 90 MB), checked against its pin: from the cache
+      # when the pins have not changed.
+      - if: runner.os == 'Linux'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: node_modules/.cache/seshi-duckdb-extensions
+          key: duckdb-pinned-${{ matrix.target }}-${{ hashFiles('scripts/duckdb-extensions.json') }}
       # A release folder laid out as GitHub serves one: latest/download/<asset>.
       - name: Build this platform's release assets
         run: bun run release:build --target ${{ matrix.target }} --out dist/site/latest/download
@@ -255,6 +287,28 @@ jobs:
           "$bin" serve --config "$dir/seshi.toml" --listen 127.0.0.1:7299 > "$dir/serve.log" 2>&1 &
           for i in $(seq 1 30); do
             if "$bin" search --status --config "$dir/seshi.toml" --json 2>/dev/null | grep -q '"ready": true'; then
+              kill %1
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "$dir/serve.log"
+          exit 1
+      # The -sql server build (seshi-server-sql-linux-*, what the -sql image ships) answers sql
+      # over a LanceDB index with DuckDB's library and lance extension from duckdb/ beside it,
+      # and seshi doctor's sql checks pass.
+      - name: The -sql server build answers sql over a LanceDB index (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          bin="$PWD/dist/site/latest/download/bin/${{ matrix.target }}-server-sql/seshi"
+          dir=$(mktemp -d)
+          printf '[store]\nurl = "file://%s/bucket"\n[search]\nbackend = "lance"\ninterval = "1s"\n' "$dir" > "$dir/seshi.toml"
+          chmod 600 "$dir/seshi.toml"
+          "$bin" serve --config "$dir/seshi.toml" --listen 127.0.0.1:7298 > "$dir/serve.log" 2>&1 &
+          for i in $(seq 1 30); do
+            if "$bin" search --status --config "$dir/seshi.toml" --json 2>/dev/null | grep -q '"ready": true'; then
+              "$bin" sql --config "$dir/seshi.toml" 'SELECT count(*) AS sessions FROM sessions'
+              "$bin" doctor --config "$dir/seshi.toml"
               kill %1
               exit 0
             fi
@@ -422,17 +476,21 @@ jobs:
       # The image ships the release's own Linux server binaries (X2.2: the server build of the
       # same release, with LanceDB, F10.6), checked against SHA256SUMS, rather than compiling
       # again.
+      # The -sql image ships the -sql archives (seshi-server-sql-linux-*) whole: the binary, and
+      # DuckDB's library and lance extension in duckdb/ beside it.
       - name: Fetch the release's Linux server binaries
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p dist/release
           gh release download "v${{ needs.release.outputs.version }}" --dir dist/release \
-            --pattern 'seshi-server-linux-*.tar.gz' --pattern SHA256SUMS
-          (cd dist/release && grep -E ' seshi-server-linux-(x64|arm64)\.tar\.gz$' SHA256SUMS | sha256sum -c -)
+            --pattern 'seshi-server-linux-*.tar.gz' --pattern 'seshi-server-sql-linux-*.tar.gz' \
+            --pattern SHA256SUMS
+          (cd dist/release && grep -E ' seshi-server-(sql-)?linux-(x64|arm64)\.tar\.gz$' SHA256SUMS | sha256sum -c -)
           for pair in amd64:x64 arm64:arm64; do
-            mkdir -p "dist/docker/linux-${pair%%:*}"
+            mkdir -p "dist/docker/linux-${pair%%:*}" "dist/docker/linux-${pair%%:*}-sql"
             tar -xzf "dist/release/seshi-server-linux-${pair##*:}.tar.gz" -C "dist/docker/linux-${pair%%:*}" seshi
+            tar -xzf "dist/release/seshi-server-sql-linux-${pair##*:}.tar.gz" -C "dist/docker/linux-${pair%%:*}-sql" seshi duckdb
           done
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
@@ -458,6 +516,31 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      # The -sql image: the same tags with -sql (0.31.0-sql, 0.31-sql, latest-sql).
+      - id: meta-sql
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/${{ github.repository }}
+          flavor: |
+            latest=false
+            suffix=-sql
+          tags: |
+            type=semver,pattern={{version}},value=v${{ needs.release.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=v${{ needs.release.outputs.version }}
+            type=raw,value=latest
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: apps/seshi/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            BINARY=prebuilt
+            VARIANT=sql
+          push: true
+          tags: ${{ steps.meta-sql.outputs.tags }}
+          labels: ${{ steps.meta-sql.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

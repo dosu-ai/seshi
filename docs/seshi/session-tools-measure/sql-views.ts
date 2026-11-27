@@ -5,6 +5,7 @@
 //   bun docs/seshi/session-tools-measure/sql-views.ts gen <uri> <sessions>
 //   bun docs/seshi/session-tools-measure/sql-views.ts time <uri> [runs]
 //
+// `time` runs each statement `runs` times on a fresh worker: the first is cold, the rest warm.
 // <uri> is a folder or a bucket URI LanceDB takes (gs://, s3://, az://). The worker reads it with
 // what SESHI_MEASURE_STORAGE holds (Lance storage options as JSON, e.g.
 // {"google_service_account_key": "<key JSON>"}), or for gs:// with Application Default
@@ -131,20 +132,25 @@ const index = await open();
 const tables = await index.sqlTables?.();
 if (!tables) throw new Error("no live generation");
 provideSql(duckdbSql);
-const service = new SqlService({
-  search: {
-    status: async () => ({ backend: "lance", location: uri, ready: true, sessions: 0, events: 0 }),
-    sqlTables: async () => tables,
-  },
-  workerEnv: {
-    SESHI_DUCKDB_EXTENSIONS: await lanceExtensions(),
-    SESHI_SQL_STORAGE: JSON.stringify(storage),
-    ...(process.env.GOOGLE_APPLICATION_CREDENTIALS
-      ? { GOOGLE_APPLICATION_CREDENTIALS: process.env.GOOGLE_APPLICATION_CREDENTIALS }
-      : {}),
-  },
-  settings: { workers: 1, timeout: 120_000 },
-});
+const extensions = await lanceExtensions();
+/** A service with one fresh worker: its first statement is cold (it starts the worker, which
+ * loads DuckDB and the lance extension, with nothing of the tables cached), the rest warm (the
+ * same worker, which still opens a fresh database, and the tables, for each statement). */
+const fresh = () =>
+  new SqlService({
+    search: {
+      status: async () => ({ backend: "lance", location: uri, ready: true, sessions: 0, events: 0 }),
+      sqlTables: async () => tables,
+    },
+    workerEnv: {
+      SESHI_DUCKDB_EXTENSIONS: extensions,
+      SESHI_SQL_STORAGE: JSON.stringify(storage),
+      ...(process.env.GOOGLE_APPLICATION_CREDENTIALS
+        ? { GOOGLE_APPLICATION_CREDENTIALS: process.env.GOOGLE_APPLICATION_CREDENTIALS }
+        : {}),
+    },
+    settings: { workers: 1, timeout: 300_000 },
+  });
 const admin = { viewer: { everything: true, own: [], canRead: () => true }, as: "ops", role: "admin", key: "ops" };
 const member = {
   viewer: { everything: false, own: ["owner3"], canRead: () => true },
@@ -163,6 +169,7 @@ for (const [as, caller] of [
   ["member", member],
 ] as const) {
   for (const [name, sql] of statements) {
+    const service = fresh();
     const times: number[] = [];
     let rows = 0;
     for (let i = 0; i < runs; i++) {
@@ -171,9 +178,9 @@ for (const [as, caller] of [
       times.push(Math.round(performance.now() - t));
       rows = result.rows.length;
     }
-    console.log(JSON.stringify({ as, name, rows, ms: times }));
+    await service.close();
+    console.log(JSON.stringify({ as, name, rows, cold: times[0], warm: times.slice(1) }));
   }
 }
-await service.close();
 await index.close();
 process.exit(0);

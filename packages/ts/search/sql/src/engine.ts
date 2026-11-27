@@ -1,4 +1,3 @@
-import { dirname, join } from "node:path";
 import {
   DuckDBArrayType,
   type DuckDBConnection,
@@ -19,14 +18,7 @@ import {
   sqlString,
 } from "@seshi/search";
 import { checkDuckdb, SqlUnparsed } from "./check-duckdb";
-import { DUCKDB_EXTENSIONS_ENV, SQL_STORAGE_ENV } from "./env";
-
-/** Where DuckDB looks for its `lance` extension (`<dir>/<version>/<platform>/`): the folder
- * `SESHI_DUCKDB_EXTENSIONS` names, else `duckdb/` beside the binary, where the `-sql` build's
- * archive and image put it. */
-export function extensionDirectory(env: NodeJS.ProcessEnv = process.env): string {
-  return env[DUCKDB_EXTENSIONS_ENV] || join(dirname(process.execPath), "duckdb");
-}
+import { extensionDirectory, SQL_STORAGE_ENV } from "./env";
 
 class QueryFailed extends Error {
   constructor(

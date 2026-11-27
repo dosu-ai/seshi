@@ -250,7 +250,7 @@ export class SqlService {
     if (status.backend === "lance") {
       if (sqlBackend() === undefined) {
         throw new SqlUnavailable(
-          "sql on a LanceDB index needs DuckDB, which only the seshi-server-sql build carries (the seshi-server-sql image, or the seshi-server-sql-linux-* archives); this build answers search but not sql",
+          "sql on a LanceDB index needs DuckDB, which only the seshi-server-sql build carries (the -sql image, ghcr.io/dosu-ai/seshi:<version>-sql, or the seshi-server-sql-linux-* archives); this build answers search but not sql",
         );
       }
       if (!status.ready) {

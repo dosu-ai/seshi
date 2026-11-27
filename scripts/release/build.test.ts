@@ -10,9 +10,10 @@ import {
   hostTarget,
   INSTALL_SCRIPTS,
   serverAsset,
+  serverSqlAsset,
   TARGETS,
 } from "./targets";
-import { standInCompile } from "./testing";
+import { standInCompile, standInDuckdb } from "./testing";
 
 const packageExtension = async (outfile: string) => writeFileSync(outfile, "a vsix");
 
@@ -27,18 +28,28 @@ describe("buildRelease", () => {
     "archives every target's binary with the licence and checksums every asset",
     async () => {
       const { compile, compiled } = standInCompile();
+      const { duckdb, asked } = standInDuckdb();
       const assets = await buildRelease({
         out,
         compile,
+        duckdb,
         packageExtension,
         mtime: Date.UTC(2026, 10, 15),
       });
-      // Each Linux target also gets the server build, with LanceDB (F10.6); laptops' do not.
+      // Each Linux target also gets the server build, with LanceDB (F10.6), and the -sql server
+      // build, with DuckDB too; laptops' do not.
       expect(compiled).toEqual(
-        TARGETS.flatMap((t) => (t.os === "linux" ? [t.id, `${t.id}-server`] : [t.id])),
+        TARGETS.flatMap((t) =>
+          t.os === "linux" ? [t.id, `${t.id}-server`, `${t.id}-server-sql`] : [t.id],
+        ),
       );
+      expect(asked).toEqual(["linux-x64", "linux-arm64"]);
       expect(assets.map((a) => a.name)).toEqual([
-        ...TARGETS.flatMap((t) => [t.asset, ...(serverAsset(t) ? [serverAsset(t)] : [])]),
+        ...TARGETS.flatMap((t) => [
+          t.asset,
+          ...(serverAsset(t) ? [serverAsset(t)] : []),
+          ...(serverSqlAsset(t) ? [serverSqlAsset(t)] : []),
+        ]),
         ...INSTALL_SCRIPTS,
         extensionAsset(repositoryVersion()),
       ]);
@@ -61,8 +72,29 @@ describe("buildRelease", () => {
       }
       expect(assets.filter((a) => a.name.startsWith("seshi-server-")).map((a) => a.name)).toEqual([
         "seshi-server-linux-x64.tar.gz",
+        "seshi-server-sql-linux-x64.tar.gz",
         "seshi-server-linux-arm64.tar.gz",
+        "seshi-server-sql-linux-arm64.tar.gz",
       ]);
+      // The -sql archive: the binary, the licence, and DuckDB's files where the binary looks.
+      const sql = readArchive(
+        "seshi-server-sql-linux-arm64.tar.gz",
+        readFileSync(join(out, "seshi-server-sql-linux-arm64.tar.gz")),
+      );
+      expect(sql.map((e) => [e.name, e.mode])).toEqual([
+        ["seshi", 0o755],
+        ["LICENSE", 0o644],
+        ["duckdb/lib/libduckdb.so", 0o644],
+        ["duckdb/v9.9.9/linux_arm64/lance.duckdb_extension", 0o644],
+      ]);
+      expect(new TextDecoder().decode(sql[0]?.data)).toContain("# linux-arm64");
+      // And laid out the same way beside the compiled binary, for a smoke test.
+      expect(
+        readFileSync(
+          join(out, "bin/linux-arm64-server-sql/duckdb/v9.9.9/linux_arm64/lance.duckdb_extension"),
+          "utf8",
+        ),
+      ).toBe("lance linux_arm64");
       expect(readFileSync(join(out, "install.sh"), "utf8")).toContain("#!/bin/sh");
     },
   );

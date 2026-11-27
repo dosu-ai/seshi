@@ -1,0 +1,46 @@
+{"sessions":5000,"events":1000000,"calls":100000,"ms":268531}
+== 1m time pass 1
+{"as":"admin","name":"count sessions","rows":1,"cold":1165,"warm":[929,804,771]}
+{"as":"admin","name":"count events","rows":1,"cold":1511,"warm":[1147,1102,1083]}
+{"as":"admin","name":"example 1","rows":40,"cold":1358,"warm":[947,955,1039]}
+{"as":"admin","name":"example 2","rows":21,"cold":1707,"warm":[1337,1222,1190]}
+{"as":"admin","name":"example 3","rows":0,"cold":1535,"warm":[1120,1117,1207]}
+{"as":"member","name":"count sessions","rows":1,"cold":963,"warm":[663,656,669]}
+{"as":"member","name":"count events","rows":1,"cold":1684,"warm":[1186,1198,1238]}
+{"as":"member","name":"example 1","rows":32,"cold":1448,"warm":[961,910,983]}
+{"as":"member","name":"example 2","rows":21,"cold":1684,"warm":[1308,1313,1468]}
+{"as":"member","name":"example 3","rows":0,"cold":1536,"warm":[1257,1316,1252]}
+== 1m time pass 2
+{"as":"admin","name":"count sessions","rows":1,"cold":983,"warm":[688,655,665]}
+{"as":"admin","name":"count events","rows":1,"cold":1339,"warm":[1055,1064,985]}
+{"as":"admin","name":"example 1","rows":40,"cold":1286,"warm":[963,940,946]}
+{"as":"admin","name":"example 2","rows":21,"cold":1509,"warm":[1249,1310,1248]}
+{"as":"admin","name":"example 3","rows":0,"cold":1407,"warm":[1043,1054,1058]}
+{"as":"member","name":"count sessions","rows":1,"cold":920,"warm":[624,620,610]}
+{"as":"member","name":"count events","rows":1,"cold":1575,"warm":[1171,1212,1179]}
+{"as":"member","name":"example 1","rows":32,"cold":1262,"warm":[985,946,940]}
+{"as":"member","name":"example 2","rows":21,"cold":1745,"warm":[1379,1286,1273]}
+{"as":"member","name":"example 3","rows":0,"cold":1518,"warm":[1244,1179,1207]}
+{"sessions":50000,"events":10000000,"calls":1000000,"ms":3969765}
+== 10m time pass 1
+{"as":"admin","name":"count sessions","rows":1,"cold":1205,"warm":[768,712,767]}
+{"as":"admin","name":"count events","rows":1,"cold":3198,"warm":[2699,2444,2434]}
+{"as":"admin","name":"example 1","rows":40,"cold":1912,"warm":[1457,1375,1402]}
+{"as":"admin","name":"example 2","rows":21,"cold":2762,"warm":[2384,2496,2298]}
+{"as":"admin","name":"example 3","rows":0,"cold":2944,"warm":[2640,2839,2802]}
+{"as":"member","name":"count sessions","rows":1,"cold":991,"warm":[677,695,709]}
+{"as":"member","name":"count events","rows":1,"cold":3352,"warm":[4375,3118,3015]}
+{"as":"member","name":"example 1","rows":32,"cold":1842,"warm":[1420,1373,1528]}
+{"as":"member","name":"example 2","rows":21,"cold":3609,"warm":[3407,3156,3388]}
+{"as":"member","name":"example 3","rows":0,"cold":3721,"warm":[3623,3432,4019]}
+== 10m time pass 2
+{"as":"admin","name":"count sessions","rows":1,"cold":1004,"warm":[698,722,661]}
+{"as":"admin","name":"count events","rows":1,"cold":2637,"warm":[2280,2310,2491]}
+{"as":"admin","name":"example 1","rows":40,"cold":1642,"warm":[1353,1334,1371]}
+{"as":"admin","name":"example 2","rows":21,"cold":2550,"warm":[2447,2314,2286]}
+{"as":"admin","name":"example 3","rows":0,"cold":2855,"warm":[2609,2720,2715]}
+{"as":"member","name":"count sessions","rows":1,"cold":1048,"warm":[706,675,667]}
+{"as":"member","name":"count events","rows":1,"cold":3476,"warm":[3015,2980,3026]}
+{"as":"member","name":"example 1","rows":32,"cold":1714,"warm":[1394,1362,1386]}
+{"as":"member","name":"example 2","rows":21,"cold":3544,"warm":[3191,3280,3443]}
+{"as":"member","name":"example 3","rows":0,"cold":3891,"warm":[3321,3430,3365]}

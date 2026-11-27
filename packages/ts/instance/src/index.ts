@@ -71,6 +71,7 @@ export {
   revealedAccess,
   SQL_STORAGE_ENV,
   searchOpener,
+  sqlCredentialAccess,
   sqlWorkerEnv,
 } from "./search-index";
 export { SEARCH_JOB, searchIndexJobs } from "./search-job";

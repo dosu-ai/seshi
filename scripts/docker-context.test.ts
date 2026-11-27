@@ -39,24 +39,36 @@ describe("parseDockerignore / isIgnored", () => {
 });
 
 describe("the image build context", () => {
-  it("holds every workspace file the seshi binary imports", async () => {
-    // The Dockerfile's build stage compiles apps/seshi/src/main.ts from the docker-ignored
-    // context, with node_modules installed inside the image. Bundling here lists the same
-    // inputs without compiling.
-    const result = await Bun.build({
-      entrypoints: [resolve(ROOT, "apps/seshi/src/main.ts")],
-      target: "bun",
-      conditions: ["bun"],
-      metafile: true,
-      throw: false,
-    });
-    expect(result.logs.filter((l) => l.level === "error").map(String)).toEqual([]);
-    const inputs = Object.keys(result.metafile?.inputs ?? {})
-      .map((p) => relative(ROOT, resolve(ROOT, p)).split(sep).join("/"))
-      .filter((p) => !p.startsWith("node_modules/") && !p.includes("/node_modules/"));
-    expect(inputs.length).toBeGreaterThan(50);
-    expect(inputs).toContain("packages/ts/review/src/labelled-fixtures.json");
+  it("holds the extension pins and the prebuilt binaries, -sql ones too", () => {
     const rules = repositoryRules(ROOT);
-    expect(inputs.filter((p) => isIgnored(rules, p))).toEqual([]);
+    expect(isIgnored(rules, "scripts/duckdb-extensions.json")).toBe(false);
+    expect(isIgnored(rules, "dist/docker/linux-amd64/seshi")).toBe(false);
+    expect(isIgnored(rules, "dist/docker/linux-amd64-sql/duckdb/lib/libduckdb.so")).toBe(false);
   });
+
+  // The -sql entry imports everything the server entry and main.ts do, and DuckDB.
+  it.each(["main.ts", "main-server-sql.ts"])(
+    "holds every workspace file the seshi binary built from %s imports",
+    async (entry) => {
+      // The Dockerfile's build stage compiles the server entry from the docker-ignored context,
+      // with node_modules installed inside the image. Bundling here lists the same inputs
+      // without compiling. Native packages for other platforms are not installed here.
+      const result = await Bun.build({
+        entrypoints: [resolve(ROOT, "apps/seshi/src", entry)],
+        target: "bun",
+        conditions: ["bun"],
+        external: ["@lancedb/lancedb-*", "@duckdb/node-bindings-*"],
+        metafile: true,
+        throw: false,
+      });
+      expect(result.logs.filter((l) => l.level === "error").map(String)).toEqual([]);
+      const inputs = Object.keys(result.metafile?.inputs ?? {})
+        .map((p) => relative(ROOT, resolve(ROOT, p)).split(sep).join("/"))
+        .filter((p) => !p.startsWith("node_modules/") && !p.includes("/node_modules/"));
+      expect(inputs.length).toBeGreaterThan(50);
+      expect(inputs).toContain("packages/ts/review/src/labelled-fixtures.json");
+      const rules = repositoryRules(ROOT);
+      expect(inputs.filter((p) => isIgnored(rules, p))).toEqual([]);
+    },
+  );
 });
