@@ -1,4 +1,5 @@
 import type { Fetch } from "@seshi/model";
+import type { AwsCredentialSource } from "./aws-credentials";
 import { BucketHttpError } from "./http-error";
 import { encodeKeyPath, type SigningCredentials, sha256Hex, signRequest, uriEncode } from "./sigv4";
 import { quote, unquote, xmlValues } from "./wire";
@@ -8,7 +9,8 @@ export interface FetchS3Options {
   region: string;
   /** `https://host[:port]`; absent for AWS, where the host is `<bucket>.s3.<region>.amazonaws.com`. */
   endpoint?: string;
-  credentials: SigningCredentials;
+  /** Keys, or where to get them before each request (a role's, which are renewed). */
+  credentials: SigningCredentials | AwsCredentialSource;
   fetch?: Fetch;
 }
 
@@ -21,9 +23,13 @@ export class S3HttpError extends BucketHttpError {
 
 export class FetchS3Client {
   private readonly fetchImpl: Fetch;
+  private readonly credentials: AwsCredentialSource;
 
   constructor(private readonly options: FetchS3Options) {
     this.fetchImpl = options.fetch ?? ((input, init) => fetch(input, init));
+    const { credentials } = options;
+    this.credentials =
+      typeof credentials === "function" ? credentials : () => Promise.resolve(credentials);
   }
 
   private url(key: string, query: Record<string, string | undefined> = {}): URL {
@@ -50,7 +56,7 @@ export class FetchS3Client {
       headers,
       payloadHash: body ? await sha256Hex(body) : undefined,
       region: this.options.region,
-      credentials: this.options.credentials,
+      credentials: await this.credentials(),
     });
     return this.fetchImpl(url.toString(), {
       method,
