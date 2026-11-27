@@ -273,6 +273,7 @@ describe("the document itself", () => {
         "GET /v1/sessions/stale",
         "GET /v1/sessions/{format}/{session_id}",
         "DELETE /v1/sessions/{format}/{session_id}",
+        "GET /v1/sessions/{format}/{session_id}/events",
         "GET /v1/sessions/{format}/{session_id}/trace",
         "GET /v1/sessions/{format}/{session_id}/export",
         "GET /v1/changes",
@@ -282,6 +283,7 @@ describe("the document itself", () => {
         "GET /v1/capture/rules",
         "GET /v1/sessions/{format}/{session_id}/reviews",
         "GET /v1/owners/{owner}/sessions/{archive_id}",
+        "GET /v1/owners/{owner}/sessions/{archive_id}/events",
         "GET /v1/owners/{owner}/sessions/{archive_id}/trace",
         "GET /v1/owners/{owner}/sessions/{archive_id}/export",
         "GET /v1/owners/{owner}/sessions/{archive_id}/reviews",
@@ -289,6 +291,7 @@ describe("the document itself", () => {
         "GET /v1/search",
         "POST /v1/sql",
         "GET /v1/sql/schema",
+        "GET /v1/search/sessions",
         "GET /v1/admin/sources",
         "GET /v1/admin/sources/{id}",
         "GET /v1/admin/sources/{id}/{kind}",
@@ -522,6 +525,22 @@ describe("the server honours it", () => {
     expect(
       (await call("GET", `/v1/sessions/claude-code/sess1/trace?hash=${content_hash}`)).status,
     ).toBe(200);
+    const events = "/v1/sessions/claude-code/sess1/events";
+    expect((await call("GET", events)).status).toBe(200);
+    expect(
+      (await call("GET", `${events}?from=0&to=3&mode=full&roles=user,assistant&max_chars=1000`))
+        .status,
+    ).toBe(200);
+    expect((await call("GET", `${events}?event=1&offset=2`)).status).toBe(200);
+    expect(
+      (await call("GET", `${events}?trace=${content_hash.slice(0, 8)}&around=1&context=1`)).status,
+    ).toBe(200);
+    for (const bad of ["from=x", "bogus=1", "from=1&around=2", "mode=short", "max_chars=10"]) {
+      expect((await call("GET", `${events}?${bad}`)).status, bad).toBe(400);
+    }
+    expect((await call("GET", `${events}?head=${"0".repeat(64)}`)).status).toBe(409);
+    expect((await call("GET", `${events}?head=${content_hash}`)).status).toBe(200);
+    expect((await call("GET", events, { token: null })).status).toBe(401);
     const exported = await app.fetch(
       new Request("http://seshi.test/v1/sessions/claude-code/sess1/export?render=letta", {
         headers: { authorization: `Bearer ${TOKEN}` },
@@ -551,7 +570,9 @@ describe("the server honours it", () => {
     expect((await call("GET", `${byArchive}/trace?render=nope`)).status).toBe(400);
     expect((await call("GET", `${byArchive}/export`)).status).toBe(200);
     expect((await call("GET", `${byArchive}/reviews`)).status).toBe(200);
-    for (const sub of ["", "/trace", "/export", "/reviews"]) {
+    expect((await call("GET", `${byArchive}/events?around=0`)).status).toBe(200);
+    expect((await call("GET", `${byArchive}/events?head=${"0".repeat(64)}`)).status).toBe(409);
+    for (const sub of ["", "/trace", "/export", "/reviews", "/events"]) {
       expect((await call("GET", `/v1/owners/acme/sessions/nope${sub}`)).status, sub).toBe(400);
       expect((await call("GET", `/v1/owners/a%2Fb/sessions/${"0".repeat(64)}${sub}`)).status).toBe(
         400,
@@ -568,6 +589,7 @@ describe("the server honours it", () => {
     expect((await call("GET", "/v1/sessions/claude-code/nope/trace")).status).toBe(404);
     expect((await call("GET", "/v1/sessions/claude-code/nope/export")).status).toBe(404);
     expect((await call("GET", "/v1/sessions/claude-code/nope/reviews")).status).toBe(404);
+    expect((await call("GET", "/v1/sessions/claude-code/nope/events")).status).toBe(404);
     expect((await call("DELETE", "/v1/sessions/claude-code/nope")).status).toBe(404);
     const tiny = await call("POST", "/v1/sessions", {
       body: { format: "claude-code", session_id: "tiny", transcript: SMALL },
@@ -579,6 +601,8 @@ describe("the server honours it", () => {
     expect((await call("GET", "/v1/sessions/claude-code/sess1/export")).status).toBe(410);
     expect((await call("GET", `${byArchive}/trace`)).status).toBe(410);
     expect((await call("GET", `${byArchive}/export`)).status).toBe(410);
+    expect((await call("GET", "/v1/sessions/claude-code/sess1/events")).status).toBe(410);
+    expect((await call("GET", `${byArchive}/events`)).status).toBe(410);
     expect(
       (
         await call("POST", "/v1/sessions", {
@@ -700,10 +724,13 @@ describe("the server honours it", () => {
     expect((await call("GET", "/v1/sessions", { app: down })).status).toBe(502);
     expect((await call("GET", "/v1/sessions/stale", { app: down })).status).toBe(502);
     expect((await call("GET", "/v1/sessions/claude-code/x", { app: down })).status).toBe(502);
-    for (const sub of ["", "/trace", "/export", "/reviews"]) {
+    for (const sub of ["", "/trace", "/export", "/reviews", "/events"]) {
       const path = `/v1/owners/acme/sessions/${"0".repeat(64)}${sub}`;
       expect((await call("GET", path, { app: down })).status, sub).toBe(502);
     }
+    expect((await call("GET", "/v1/sessions/claude-code/x/events", { app: down })).status).toBe(
+      502,
+    );
     expect((await call("GET", "/v1/sessions/claude-code/x/trace", { app: down })).status).toBe(502);
     expect((await call("GET", "/v1/sessions/claude-code/x/export", { app: down })).status).toBe(
       502,
@@ -1367,6 +1394,7 @@ describe("search (F10)", () => {
 
     // Until the index has caught up once, it says so (F10.3).
     expect((await call("GET", "/v1/search?q=auth", as)).status).toBe(503);
+    expect((await call("GET", "/v1/search/sessions", as)).status).toBe(503);
     const body = { format: "claude-code", session_id: "sess1", transcript: CLAUDE };
     expect((await call("POST", "/v1/sessions", { ...as, body })).status).toBe(201);
     await instance.search?.catchUp();
@@ -1380,6 +1408,25 @@ describe("search (F10)", () => {
     for (const bad of ["q=", "q=x&limit=two", "q=x&q=y", "q=x&page=2", "q=x&owner=a/b", "q=--"]) {
       expect((await call("GET", `/v1/search?${bad}`, as)).status, bad).toBe(400);
     }
+    const listed = await call(
+      "GET",
+      "/v1/search/sessions?since=30d&limit=5&agent=claude-code&label=team=core",
+      as,
+    );
+    expect(listed.status).toBe(200);
+    const recent = await call("GET", "/v1/search/sessions?since=3650d&until=2099-01-01", as);
+    expect(recent.body).toMatchObject({ sessions: [{ owner: "acme", session_id: "sess1" }] });
+    for (const bad of [
+      "limit=two",
+      "since=soon",
+      "after=%21",
+      "owner=a/b",
+      "q=x",
+      "since=1d&since=2d",
+    ]) {
+      expect((await call("GET", `/v1/search/sessions?${bad}`, as)).status, bad).toBe(400);
+    }
+    expect((await call("GET", "/v1/search/sessions", { ...as, token: null })).status).toBe(401);
     expect((await call("GET", "/v1/search?q=auth", { ...as, token: null })).status).toBe(401);
     const reader = await auth.sessions?.sign({
       owner: "acme",
@@ -1393,6 +1440,9 @@ describe("search (F10)", () => {
     expect(
       (await call("GET", "/v1/search?q=auth&owner=bob", { ...as, token: reader?.token })).status,
     ).toBe(403);
+    expect(
+      (await call("GET", "/v1/search/sessions?owner=bob", { ...as, token: reader?.token })).status,
+    ).toBe(403);
     const off = appOver(
       testInstance({
         store,
@@ -1402,8 +1452,10 @@ describe("search (F10)", () => {
       }),
     );
     expect((await call("GET", "/v1/search?q=auth", { app: off })).status).toBe(404);
+    expect((await call("GET", "/v1/search/sessions", { app: off })).status).toBe(404);
     down = true;
     expect((await call("GET", "/v1/search?q=auth", as)).status).toBe(502);
+    expect((await call("GET", "/v1/search/sessions?since=3650d", as)).status).toBe(502);
     await instance.close();
   });
 });

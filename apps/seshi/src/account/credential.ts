@@ -11,7 +11,8 @@ type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
  * shared sessions too; when the sign-in has run out and cannot be renewed, the device token,
  * which reads its owner's own (X5.10), with `fallback` saying so. Reading another owner's
  * never falls back: the device token would find none of theirs. */
-export type Purpose = "read" | "read_others" | "delete" | "upload" | "share";
+/** What a credential is for. `mcp` reads as `read` does, for an agent (`seshi mcp`). */
+export type Purpose = "read" | "read_others" | "delete" | "upload" | "share" | "mcp";
 
 /** There is no usable credential for the server: never signed in, or it ran out. */
 export class NotSignedIn extends Error {
@@ -188,7 +189,7 @@ export async function credentialFor(
       } catch (err) {
         // The device token reads its owner's own sessions (X5.10): enough for a read while the
         // sign-in cannot be renewed, whether the IdP refused or could not be reached.
-        const fallback = purpose === "read" ? await device() : "missing";
+        const fallback = purpose === "read" || purpose === "mcp" ? await device() : "missing";
         if (typeof fallback === "string") throw err;
         const why = err instanceof NotSignedIn ? "" : ` (${(err as Error).message})`;
         return {

@@ -1,0 +1,3791 @@
+openapi: 3.1.0
+info:
+  title: seshi
+  version: "1"
+  summary: Coding-agent sessions as a durable, redacted, content-addressed archive.
+  description: |
+    The HTTP contract of a seshi server, and of the `http` backend in every SDK.
+
+    A client posts the transcript of a coding-agent session, whole or in chunks as it grows.
+    The server turns it into an envelope and runs it through one pipeline, in memory: it
+    normalizes it, redacts it, decides whether it is worth a trace and how much of it is new,
+    and writes only the trace, in seshi's one canonical format (`seshi/trace/1`), in the
+    layout of `layout.md` beside this file. The transcript itself is never stored. Stored objects (trace, metadata, change entry) are defined by
+    the JSON Schemas in `schemas/`, which these components reference. A reader can read the
+    bucket, or ask for a trace rendered as Letta, OTLP or ATIF (`GET …/trace?format=`).
+
+    Every request but `/healthz`, `/v1/auth/config` and `/v1/auth/exchange` carries
+    `Authorization: Bearer <token>` (X5): the org key with the caller's username in
+    `X-Seshi-User`, a session, device, admin or service token, or a static token from config.
+    The credential names the caller's owner ID and carries scopes (`sessions:write`,
+    `sessions:read`, `sessions:delete`, `search`, `sources:admin`, `tokens:admin`). A caller
+    writes only its own sessions; it reads its own and those whose visibility is `org`, or
+    everything as an admin or a service reader. Reads take `?owner=` to read another owner's
+    sessions; a session the caller may not read answers `404`. Request bodies may be sent
+    `Content-Encoding: gzip`.
+
+    The TypeScript SDK's `HttpSeshi` maps the error responses back to the errors its store
+    backend throws: `409 offset_mismatch` to `OffsetMismatch`, `409 conflict` to
+    `SessionConflict`, `403 forbidden` to `Forbidden`, `422` to `SessionRejected`, `502` to
+    `StoreError`; everything else is a `ServerError`. A server implementing this
+    document and the SDK over a store must agree on every result; `tests/api/http-backend.test.ts`
+    holds them to it, and `tests/api/openapi.test.ts` holds the server to this document.
+  license:
+    name: MIT
+    identifier: MIT
+
+servers:
+  - url: http://localhost:7200
+    description: A local server (`bun start`).
+
+security:
+  - bearer: []
+
+tags:
+  - name: health
+  - name: auth
+  - name: identity
+  - name: sessions
+  - name: changes
+  - name: tokens
+  - name: admin
+  - name: redaction
+  - name: capture
+  - name: otlp
+  - name: search
+
+paths:
+  /healthz:
+    get:
+      tags: [health]
+      summary: Liveness.
+      operationId: health
+      security: []
+      responses:
+        "200":
+          description: The server is up.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, version]
+                properties:
+                  ok: { const: true }
+                  version:
+                    type: string
+                    description: The server's release.
+              example: { ok: true, version: "0.1.1" }
+
+  /v1/auth/config:
+    get:
+      tags: [auth]
+      summary: Which ways in the server takes.
+      operationId: authConfig
+      description: |
+        Lets `seshi login --server <url>` pick its flow (X5.7): the org key, sign-in through
+        the IdP (device flow or PKCE against `oidc.issuer` with `oidc.client_id`), or both.
+      security: []
+      responses:
+        "200":
+          description: The server's modes.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthConfig" }
+
+  /v1/auth/exchange:
+    post:
+      tags: [auth]
+      summary: Exchange an IdP ID token for seshi tokens.
+      operationId: exchange
+      description: |
+        Checks the ID token against the IdP's published keys: signature, issuer, audience
+        (`auth.oidc.audience`, else the client id), expiry, and `nonce` when either side has
+        one (X5.2). Answers a session token (one hour) and, when the request names a
+        `machine`, a device token for it (90 days); a device token earlier issued for that
+        machine is revoked. The owner ID is the ID token's `owner_claim` (X5.8); the role is
+        admin for members of `admin_group` or emails on `admins` (X5.3).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ExchangeRequest" }
+      responses:
+        "200":
+          description: The seshi tokens, each shown once.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExchangeResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401":
+          description: "`unauthorized`: the ID token does not check out, or lacks the owner claim."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404":
+          description: "`no_idp`: this server has no IdP; members use the org key."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /v1/me:
+    get:
+      tags: [identity]
+      summary: Who the credential is, and where sessions go.
+      operationId: me
+      description: |
+        The caller's owner ID, credential kind, role, scopes and owner basis, and the bucket
+        the server writes, as a reader would need to know it. Never a secret.
+      responses:
+        "200":
+          description: The identity.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Identity" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/owners:
+    get:
+      tags: [identity]
+      summary: The owners the bucket holds sessions for.
+      operationId: listOwners
+      description: |
+        Owner IDs in key order (X5.8): people and service accounts (`svc:<source-id>`). There
+        is no stored list of people; this lists the bucket's owner folders. Needs
+        `sessions:read`.
+      parameters:
+        - name: after
+          in: query
+          description: The `cursor` of the last page.
+          schema: { $ref: "#/components/schemas/Owner" }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 100 }
+      responses:
+        "200":
+          description: A page of owners.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OwnersPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/owners/{owner}/sessions/{archive_id}:
+    parameters:
+      - $ref: "#/components/parameters/owner_folder"
+      - $ref: "#/components/parameters/archive_id"
+    get:
+      tags: [sessions]
+      summary: The session's pointer, by owner and archive id.
+      operationId: getSessionByArchive
+      description: |
+        The session `GET /v1/sessions/{format}/{session_id}` answers, addressed as the store
+        files it: for a reader that holds the owner and archive id a change entry, a search
+        result or a listing names. The owner is that folder exactly, no aliases folded in, and
+        there is no default. `404` for a stub (F3.4: no trace yet, its first upload dropped by
+        model review), as for its trace, export and reviews, and for a session the caller may
+        not read.
+
+        Any credential reads its own owner's sessions, being their owner, without
+        `sessions:read`: a device token reads the sessions it uploaded (X5.10). Another
+        owner's need `sessions:read`; a credential without it finds none of them, shared or
+        not, so they are `404` (never `403`), as for a session that is not there.
+      responses:
+        "200":
+          description: The session's `metadata.json`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionMetadata" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/owners/{owner}/sessions/{archive_id}/events:
+    parameters:
+      - $ref: "#/components/parameters/owner_folder"
+      - $ref: "#/components/parameters/archive_id"
+    get:
+      tags: [sessions]
+      summary: Part of the session's events, by owner and archive id.
+      operationId: getEventsByArchive
+      description: |
+        Part of the session's events, read from its stored traces (`read_session`). Events are
+        numbered by `seq`: their place in the session's current trace chain (its last whole
+        upload and the continuations after it), from 0 across its traces. A replace starts a
+        new chain, so `seq`s hold while the head does: every answer names it
+        (`session.head`), and `head` refuses a changed session. The session's header gives
+        its agent, repository, times, number of events, models and token totals. Read as the
+        trace routes are: anyone who may read the session.
+      parameters:
+        - name: from
+          in: query
+          description: The first `seq` of the range `[from, to)`; 0 by default.
+          schema: { type: integer, minimum: 0 }
+        - name: to
+          in: query
+          description: The `seq` after the range's last; the session's end by default.
+          schema: { type: integer, minimum: 0 }
+        - name: around
+          in: query
+          description: Or, instead of `from` and `to`, `context` events either side of this one.
+          schema: { type: integer, minimum: 0 }
+        - name: context
+          in: query
+          description: Events either side of `around`; larger values are capped at 50.
+          schema: { type: integer, minimum: 0, default: 5 }
+        - name: mode
+          in: query
+          description: "`condensed` cuts each tool result to its first 200 characters; `full` gives it as stored."
+          schema: { type: string, enum: [condensed, full], default: condensed }
+        - name: roles
+          in: query
+          description: Only events of these roles, comma-separated; the others are skipped.
+          schema: { type: string }
+        - name: max_chars
+          in: query
+          description: |
+            Characters of event text to give at most; larger values are capped at 30000. The
+            answer stops at an event boundary and gives `next`, or cuts an event that does not
+            fit when nothing is given yet or much room is left (`cut` says how much was left
+            out).
+          schema: { type: integer, minimum: 1000, default: 30000 }
+        - name: event
+          in: query
+          description: Read this one event's text in pieces, from `offset` (with `next_offset`).
+          schema: { type: integer, minimum: 0 }
+        - name: offset
+          in: query
+          description: With `event`, where in its text to start.
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: trace
+          in: query
+          description: |
+            Count `from`, `to`, `around` and `event` from the start of this trace of the
+            session's current chain (a content hash, or its first 8 or more characters): a
+            search match's `content_hash` and `event_index`. The answer gives `seq`s.
+          schema: { type: string, pattern: "^[0-9a-f]{8,64}$" }
+        - name: head
+          in: query
+          description: Refuse with `409 head_changed` when the session's head is no longer this one.
+          schema: { $ref: "#/components/schemas/Sha256" }
+      responses:
+        "200":
+          description: The session's header and the events read.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionEvents" }
+        "400":
+          description: |
+            `bad_query`: an unknown or repeated parameter, a value that is not one, `around`
+            with `from` or `to`, `event` with a range, a position past the session's events, a
+            `trace` that names more than one of its traces.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404":
+          description: |
+            `not_found`: no such session, or one the caller may not read. `no_trace`: the
+            session has no head, or a trace of its chain is missing. `not_in_chain`: `trace` is
+            not one of the session's current traces (a replace dropped it).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: "`head_changed`: the session's head is no longer `head`; its events may be numbered again."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "410":
+          description: The session was tombstoned; it has no events and will not again.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/owners/{owner}/sessions/{archive_id}/trace:
+    parameters:
+      - $ref: "#/components/parameters/owner_folder"
+      - $ref: "#/components/parameters/archive_id"
+    get:
+      tags: [sessions]
+      summary: The session's trace, by owner and archive id.
+      operationId: getTraceByArchive
+      parameters:
+        - name: hash
+          in: query
+          description: One of the session's traces (a `traces[].content_hash`); the head by default. Any other hash is 404, even when an object a stopped backfill or replace left behind is under it.
+          schema: { type: string }
+        - name: render
+          in: query
+          description: |
+            How to render the stored trace; `seshi`, the stored canonical trace, by default.
+            Until seshi 0.17 the server also reads it as `format`, its name before 0.16.
+          schema: { $ref: "#/components/schemas/RenderFormat" }
+      responses:
+        "200":
+          description: The trace, as `render` renders it.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: "#/components/schemas/Trace" }
+                  - { $ref: "#/components/schemas/LettaTrace" }
+                  - { $ref: "#/components/schemas/OtlpTrace" }
+                  - { $ref: "#/components/schemas/AtifDocument" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404":
+          description: |
+            `not_found`: no such session (a filtered session is not stored), or no trace with
+            that hash. `no_trace`: the session has no head.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "410":
+          description: The session was tombstoned; it has no trace and will not again.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/owners/{owner}/sessions/{archive_id}/export:
+    parameters:
+      - $ref: "#/components/parameters/owner_folder"
+      - $ref: "#/components/parameters/archive_id"
+    get:
+      tags: [sessions]
+      summary: The session's trace as a download, by owner and archive id.
+      operationId: exportTraceByArchive
+      description: |
+        The same trace `…/trace` answers, with `Content-Disposition: attachment` and a file
+        name naming the session's format, the session, the trace's hash and the render format
+        (`claude-code-sess1-0123456789ab.letta.json`).
+      parameters:
+        - name: hash
+          in: query
+          description: One of the session's traces (a `traces[].content_hash`); the head by default. Any other hash is 404, even when an object a stopped backfill or replace left behind is under it.
+          schema: { type: string }
+        - name: render
+          in: query
+          description: |
+            How to render the stored trace; `seshi`, the stored canonical trace, by default.
+            Until seshi 0.17 the server also reads it as `format`, its name before 0.16.
+          schema: { $ref: "#/components/schemas/RenderFormat" }
+      responses:
+        "200":
+          description: The trace, as `render` renders it.
+          headers:
+            Content-Disposition:
+              description: '`attachment; filename="<format>-<session>-<hash12>.<render>.json"`'
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: "#/components/schemas/Trace" }
+                  - { $ref: "#/components/schemas/LettaTrace" }
+                  - { $ref: "#/components/schemas/OtlpTrace" }
+                  - { $ref: "#/components/schemas/AtifDocument" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404":
+          description: |
+            `not_found`: no such session, or no trace with that hash. `no_trace`: the session
+            has no head.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "410":
+          description: The session was tombstoned; it has no trace and will not again.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/owners/{owner}/sessions/{archive_id}/reviews:
+    parameters:
+      - $ref: "#/components/parameters/owner_folder"
+      - $ref: "#/components/parameters/archive_id"
+    get:
+      tags: [sessions]
+      summary: What model review decided for each stored write of the session (F3.8), by owner and archive id.
+      operationId: sessionReviewsByArchive
+      description: |
+        One entry per write that model review saw and that was stored, in order
+        (`review/<n>.json`). Admins get the whole audit record: the policy and its hash, both
+        models, the findings by record, field and category (never the text), and why review
+        was skipped. Anyone else who may read the session gets only `n`, `at`, `content_hash`
+        and `decision` (`allow`, `redact` or `skipped`). Writes no policy covered have no
+        entry. Envelopes review dropped left nothing in the session (a dropped first upload
+        only a stub, which is `404` here); they are drop records (`seshi sync dropped`). Its
+        own sessions' any credential reads; another owner's need `sessions:read` (X5.10).
+      responses:
+        "200":
+          description: The decisions, oldest first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReviewsPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/sessions:
+    post:
+      tags: [sessions]
+      summary: Store a session, whole or as a chunk.
+      operationId: ingest
+      description: |
+        The transcript is normalized, redacted and judged in memory; only the trace is
+        written, never the transcript (X6.3).
+
+        - The session's first trace is judged by the session filter: under 2000 characters of
+          conversation, or no user turn, or nothing answering it, is `filtered`. Nothing is
+          stored, and the answer's `bytes_total` is 0: send the whole log again once it grows.
+        - Until the session has a trace, the server takes only the whole log (`offset` 0). A
+          chunk for a session without one is `409 offset_mismatch` with `expected: 0`.
+        - Model review dropping the session's first upload (`dropped`, or review failed with
+          `on_failure = "drop"`) leaves a stub (F3.4): no trace, only where the log ends and
+          its prefix hash. The answer's `bytes_total` is that offset, and the session is then
+          continued as one with a trace: the next chunk, or a whole log that extends it, is
+          reviewed on its own and stored as the session's first trace. The dropped part is
+          never reviewed or stored again; a whole log of nothing more answers `unchanged`.
+        - A chunk (`offset` > 0) is the log's bytes from where the session's log ends (the
+          `bytes_total` of the last answer), whole lines of a `jsonl` log. It is normalized on
+          its own, with the small state the session keeps (`normalized`, `withheld_calls`),
+          and written as a continuation of the head. It is never filtered. A chunk with no
+          records in it moves the log on (`unchanged`).
+        - A whole upload of a session that has a trace must extend it: its records start with
+          what is stored. Then only the tail is written (never filtered), or nothing when there
+          is no tail (`unchanged`). Otherwise it is `409 conflict`, unless it sets `replace`,
+          which only the session's original writer or an admin may (`403` for anyone else).
+          With the org key the stated username does not prove that (anyone holding the key can
+          state it, X5.12): the replace also carries the session's retraction secret in
+          `X-Seshi-Retract` (F9.7), which only the machine that uploaded it holds.
+        - `rebuild` builds the session again from the whole log and reviews it again, even
+          when the log only extends what is stored (X4.9): it replaces the session, with the
+          same permission as `replace`. The uploader sends it for sessions an older normalizer
+          built (`GET /v1/sessions/stale`) and for `seshi capture resend`. A rebuild or replace
+          of a session whose first envelopes review dropped leaves that dropped start out: it
+          is never reviewed or stored again (F3.4).
+        - Every upload has an idempotency key (the `Idempotency-Key` header, or
+          `idempotency_key`; by default the session, the offset and a digest of the
+          transcript, plus a fresh suffix for a `rebuild`). A resend with a key the session
+          recently applied gets the same answer.
+
+        `201` when a trace was written, `200` otherwise. `422` is final for that upload; `409
+        offset_mismatch` says where to resume from; `502` is the bucket failing and is
+        retryable.
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Identifies this upload across resends (X4.7); wins over `idempotency_key`.
+          schema: { type: string, minLength: 1, maxLength: 2048 }
+        - name: X-Seshi-Retract
+          in: header
+          required: false
+          description: |
+            With `replace`: the session's retraction secret (F9.7), whose sha256 it was first
+            uploaded with as `retract_hash`. An org-key caller needs it to replace; read only
+            with `replace` and never stored.
+          schema: { type: string, minLength: 1 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Upload" }
+      responses:
+        "201":
+          description: A trace was written.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Stored" }
+        "200":
+          description: |
+            No new trace: the trace was already there (`duplicate`), nothing in the upload was
+            new (`unchanged`), the session filter kept the session out (`filtered`), or model
+            review dropped it (`dropped`; the log moves past it, a first upload's included).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IngestResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "413":
+          description: |
+            `too_large`: the request body, decoded, is larger than any upload under
+            `limits.max_upload_bytes` can need (twice that, plus 1 MiB), so it was not read.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "415": { $ref: "#/components/responses/UnsupportedEncoding" }
+        "403":
+          description: |
+            `forbidden`: the credential cannot write (`sessions:write`), or a `replace` by
+            someone other than the session's original writer or an admin. An org-key caller
+            never writes to, or replaces, a session whose owner was verified, and replaces one
+            the org key wrote only with its retraction secret (`X-Seshi-Retract`). Nothing is
+            stored.
+
+            `excluded`: the org's exclude list (`[capture] exclude`, `GET /v1/capture/rules`)
+            names the session's `repo`. Nothing is stored, and the same session is refused
+            whenever it is sent; the message names no entry. A laptop's uploader settles such a
+            session as excluded and sends it no more.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: |
+            Nothing is stored. `offset_mismatch`: a chunk that does not start where the
+            session's log ends; the client resends from `expected` (0 while the session has no
+            trace: the whole log). `conflict`: a whole upload that does not extend the stored
+            session; its writer may send it again with `replace`.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: "#/components/schemas/OffsetMismatch" }
+                  - { $ref: "#/components/schemas/Conflict" }
+        "422":
+          description: |
+            The transcript cannot be stored, and resending the same bytes cannot succeed.
+            Nothing is stored. `code` is one of `unsupported_agent`, `too_large`, `empty`,
+            `bad_chunk`, `redacted` (the session was tombstoned), `normalize_<code>` or
+            `invalid`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+    get:
+      tags: [sessions]
+      summary: List an owner's sessions.
+      operationId: listSessions
+      description: |
+        Every session's `metadata.json` under the owner (the caller's own by default, with
+        the old owner IDs `auth.owner_aliases` folds into it), paged by key, as far as the
+        caller may read them (X5.10). A full listing; a reader that wants an index builds its
+        own from the change feed. A stub (a session whose first upload model review dropped,
+        with no trace yet, F3.4) is not listed.
+
+        Any credential lists its own owner's sessions, being their owner: a device token, which
+        has no `sessions:read`, lists the sessions it uploaded, private ones too. Another
+        owner's need `sessions:read`: a credential without it naming another owner is `403`.
+      parameters:
+        - $ref: "#/components/parameters/owner"
+        - name: after
+          in: query
+          description: The `cursor` of the last page.
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 100 }
+      responses:
+        "200":
+          description: A page of sessions.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionsPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/sessions/stale:
+    get:
+      tags: [sessions]
+      summary: List the caller's stale sessions.
+      operationId: staleSessions
+      description: |
+        The caller's own sessions an older normalizer built (X4.9): each session's metadata
+        records the format version that built it (`normalizer.format_version`, the oldest of
+        its traces), and a session is stale when that is older than its format's current
+        version, or not recorded. The server keeps no raw logs, so it cannot rebuild them: the
+        uploader that sent them sends each again whole with `rebuild`. Needs `sessions:write`
+        (what the uploader's credential holds); lists only the session ids of the caller's own
+        sessions. Paged by key like `GET /v1/sessions`, so a page can hold no session and still
+        be `truncated`.
+      parameters:
+        - name: after
+          in: query
+          description: The `cursor` of the last page.
+          schema: { type: string }
+        - name: limit
+          in: query
+          description: How many keys to look through (not sessions to return).
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 1000 }
+      responses:
+        "200":
+          description: A page of stale sessions.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StaleSessionsPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/sessions/{format}/{session_id}:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/session_id"
+      - $ref: "#/components/parameters/owner"
+    get:
+      tags: [sessions]
+      summary: The session's pointer.
+      operationId: getSession
+      description: |
+        `404` for a stub (F3.4: no trace yet, its first upload dropped by model review), as for
+        its trace, export and reviews.
+
+        Any credential reads its own owner's sessions, being their owner, without
+        `sessions:read`: a device token reads the sessions it uploaded (X5.10). Another
+        owner's need `sessions:read`; a credential without it finds none of them, shared or
+        not, so they are `404` (never `403`), as for a session that is not there.
+      responses:
+        "200":
+          description: The session's `metadata.json`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionMetadata" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/StorageError" }
+    patch:
+      tags: [sessions]
+      summary: Change who may read the session.
+      operationId: setVisibility
+      description: |
+        The session's owner or an admin changes its visibility (X5.10), with a credential
+        that writes sessions or reads them: the owner's device token (`sessions:write`) shares
+        and unshares the owner's own sessions. A credential that cannot read finds only its
+        own owner's sessions here (404 for anyone else's), so it learns nothing of others';
+        its answer is that session's metadata, as for every caller. A service token that only
+        writes may not change visibility (403): its source's setting decides it. An org-key
+        caller cannot change a session whose owner was verified (X5.12). A change
+        appends a
+        `visibility_changed` entry to the change feed; setting what it already is writes
+        nothing. It works on a stub (F3.4) too, for its owner or an admin: the session's
+        first trace then has that visibility.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [visibility]
+              properties:
+                visibility: { $ref: "#/components/schemas/Visibility" }
+      responses:
+        "200":
+          description: The session's `metadata.json`, as it now is.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionMetadata" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "410":
+          description: The session was tombstoned; nothing of it is left to read.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502": { $ref: "#/components/responses/StorageError" }
+    delete:
+      tags: [sessions]
+      summary: Tombstone the session.
+      operationId: tombstone
+      description: |
+        Remove the session's trace objects, mark its pointer `redacted`, and append a
+        tombstone to the change feed. Irreversible: a later upload of the same session is
+        refused with `422 redacted`. A reader that already copied the trace still has it.
+        Needs `sessions:delete` (X5.3): an admin token; the owner's session token issued in
+        the last 10 minutes; or a static token for its owner. The org key cannot delete. A
+        stub (F3.4) is tombstoned the same way, by its owner or an admin, and `removed` is 0.
+
+        With `X-Seshi-Retract` it is a retraction instead (F9.7): the machine that uploaded the
+        session sends the retraction secret whose sha256 it sent as `retract_hash`, with its
+        normal upload credential (`sessions:write`: a device token, or the org key with its
+        username). It acts on the caller's own sessions only (`owner` is ignored; old owner ids
+        that `[auth.owner_aliases]` folds into the caller's count), and the tombstone's reason is
+        `retracted`. The server's `capture.allow_retract` turns it off.
+      parameters:
+        - name: X-Seshi-Retract
+          in: header
+          required: false
+          description: The session's retraction secret (F9.7); only its hash was ever sent.
+          schema: { type: string, minLength: 1 }
+      responses:
+        "200":
+          description: Removed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [removed]
+                properties:
+                  removed:
+                    type: integer
+                    description: How many objects were deleted.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: |
+            As `Forbidden`; for a retraction, `code` is `bad_retract_secret` (not the secret the
+            session was uploaded with, or it was uploaded with none) or `retract_disabled`
+            (`capture.allow_retract = false`).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "410":
+          description: A retraction of a session already removed. `code` is `redacted`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/sessions/{format}/{session_id}/events:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/session_id"
+      - $ref: "#/components/parameters/owner"
+    get:
+      tags: [sessions]
+      summary: Part of the session's events, numbered across its traces.
+      operationId: getEvents
+      description: |
+        Part of the session's events, read from its stored traces (`read_session`). Events are
+        numbered by `seq`: their place in the session's current trace chain (its last whole
+        upload and the continuations after it), from 0 across its traces. A replace starts a
+        new chain, so `seq`s hold while the head does: every answer names it
+        (`session.head`), and `head` refuses a changed session. The session's header gives
+        its agent, repository, times, number of events, models and token totals. Read as the
+        trace routes are: anyone who may read the session.
+      parameters:
+        - name: from
+          in: query
+          description: The first `seq` of the range `[from, to)`; 0 by default.
+          schema: { type: integer, minimum: 0 }
+        - name: to
+          in: query
+          description: The `seq` after the range's last; the session's end by default.
+          schema: { type: integer, minimum: 0 }
+        - name: around
+          in: query
+          description: Or, instead of `from` and `to`, `context` events either side of this one.
+          schema: { type: integer, minimum: 0 }
+        - name: context
+          in: query
+          description: Events either side of `around`; larger values are capped at 50.
+          schema: { type: integer, minimum: 0, default: 5 }
+        - name: mode
+          in: query
+          description: "`condensed` cuts each tool result to its first 200 characters; `full` gives it as stored."
+          schema: { type: string, enum: [condensed, full], default: condensed }
+        - name: roles
+          in: query
+          description: Only events of these roles, comma-separated; the others are skipped.
+          schema: { type: string }
+        - name: max_chars
+          in: query
+          description: |
+            Characters of event text to give at most; larger values are capped at 30000. The
+            answer stops at an event boundary and gives `next`, or cuts an event that does not
+            fit when nothing is given yet or much room is left (`cut` says how much was left
+            out).
+          schema: { type: integer, minimum: 1000, default: 30000 }
+        - name: event
+          in: query
+          description: Read this one event's text in pieces, from `offset` (with `next_offset`).
+          schema: { type: integer, minimum: 0 }
+        - name: offset
+          in: query
+          description: With `event`, where in its text to start.
+          schema: { type: integer, minimum: 0, default: 0 }
+        - name: trace
+          in: query
+          description: |
+            Count `from`, `to`, `around` and `event` from the start of this trace of the
+            session's current chain (a content hash, or its first 8 or more characters): a
+            search match's `content_hash` and `event_index`. The answer gives `seq`s.
+          schema: { type: string, pattern: "^[0-9a-f]{8,64}$" }
+        - name: head
+          in: query
+          description: Refuse with `409 head_changed` when the session's head is no longer this one.
+          schema: { $ref: "#/components/schemas/Sha256" }
+      responses:
+        "200":
+          description: The session's header and the events read.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionEvents" }
+        "400":
+          description: |
+            `bad_query`: an unknown or repeated parameter, a value that is not one, `around`
+            with `from` or `to`, `event` with a range, a position past the session's events, a
+            `trace` that names more than one of its traces.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404":
+          description: |
+            `not_found`: no such session, or one the caller may not read. `no_trace`: the
+            session has no head, or a trace of its chain is missing. `not_in_chain`: `trace` is
+            not one of the session's current traces (a replace dropped it).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: "`head_changed`: the session's head is no longer `head`; its events may be numbered again."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "410":
+          description: The session was tombstoned; it has no events and will not again.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/sessions/{format}/{session_id}/trace:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/session_id"
+      - $ref: "#/components/parameters/owner"
+    get:
+      tags: [sessions]
+      summary: The session's trace.
+      operationId: getTrace
+      parameters:
+        - name: hash
+          in: query
+          description: One of the session's traces (a `traces[].content_hash`); the head by default. Any other hash is 404, even when an object a stopped backfill or replace left behind is under it.
+          schema: { type: string }
+        - name: render
+          in: query
+          description: |
+            How to render the stored trace; `seshi`, the stored canonical trace, by default.
+            Until seshi 0.17 the server also reads it as `format`, its name before 0.16.
+          schema: { $ref: "#/components/schemas/RenderFormat" }
+      responses:
+        "200":
+          description: The trace, as `render` renders it.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: "#/components/schemas/Trace" }
+                  - { $ref: "#/components/schemas/LettaTrace" }
+                  - { $ref: "#/components/schemas/OtlpTrace" }
+                  - { $ref: "#/components/schemas/AtifDocument" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404":
+          description: |
+            `not_found`: no such session (a filtered session is not stored), or no trace with
+            that hash. `no_trace`: the session has no head.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "410":
+          description: The session was tombstoned; it has no trace and will not again.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/sessions/{format}/{session_id}/export:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/session_id"
+      - $ref: "#/components/parameters/owner"
+    get:
+      tags: [sessions]
+      summary: The session's trace as a download.
+      operationId: exportTrace
+      description: |
+        The same trace `…/trace` answers, with `Content-Disposition: attachment` and a file
+        name naming the session's format, the session, the trace's hash and the render format
+        (`claude-code-sess1-0123456789ab.letta.json`).
+      parameters:
+        - name: hash
+          in: query
+          description: One of the session's traces (a `traces[].content_hash`); the head by default. Any other hash is 404, even when an object a stopped backfill or replace left behind is under it.
+          schema: { type: string }
+        - name: render
+          in: query
+          description: |
+            How to render the stored trace; `seshi`, the stored canonical trace, by default.
+            Until seshi 0.17 the server also reads it as `format`, its name before 0.16.
+          schema: { $ref: "#/components/schemas/RenderFormat" }
+      responses:
+        "200":
+          description: The trace, as `render` renders it.
+          headers:
+            Content-Disposition:
+              description: '`attachment; filename="<format>-<session>-<hash12>.<render>.json"`'
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: "#/components/schemas/Trace" }
+                  - { $ref: "#/components/schemas/LettaTrace" }
+                  - { $ref: "#/components/schemas/OtlpTrace" }
+                  - { $ref: "#/components/schemas/AtifDocument" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404":
+          description: |
+            `not_found`: no such session, or no trace with that hash. `no_trace`: the session
+            has no head.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "410":
+          description: The session was tombstoned; it has no trace and will not again.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/changes:
+    get:
+      tags: [changes]
+      summary: An owner's change feed.
+      operationId: changes
+      description: |
+        One entry per publish, tombstone or visibility change, in key order; keys are
+        time-stamped and unique, so the feed is a listing after a cursor. Stamps come from the
+        clocks of the machines that uploaded, so a consumer re-reads a lag window behind its
+        cursor and dedupes by key. An entry is written before the session changes, so it may
+        name a change not made yet, or one that failed: read the session for what it is now.
+        Another owner's feed shows the entries of sessions the caller may read now (X5.10), and
+        none of a stub's (F3.4). A stub's first trace is its first `published` entry.
+
+        Any credential reads its own owner's feed; another owner's needs `sessions:read`, and a
+        credential without it naming another owner is `403` (X5.10).
+      parameters:
+        - $ref: "#/components/parameters/owner"
+        - name: after
+          in: query
+          description: The last key already processed.
+          schema: { type: string }
+        - name: since
+          in: query
+          description: Start from this time instead (RFC 3339). Ignored when `after` is given.
+          schema: { type: string, format: date-time }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 100 }
+      responses:
+        "200":
+          description: A page of the feed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChangesPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/changes/all:
+    get:
+      tags: [changes]
+      summary: Every owner's change feed, as one.
+      operationId: allChanges
+      description: |
+        Every owner's entries in one feed with one cursor, for a reader that reads every
+        session: a service token or an admin. Any other caller is refused (`403`), never
+        served a filtered feed, so a session one may not read never shows up in it.
+
+        Entries are ordered by stamp, then owner, then key; each names its owner and its key.
+        The feed is read from this instance's search index, which keeps a copy of every
+        owner's feed (so `search.enabled` must be on). It serves only entries stamped no later
+        than `through`: a time up to which every owner's feed had been read, and no later than
+        when the indexer's owner list was taken. An owner that first writes later stamps its
+        entries after that time (up to the skew of its clock, which the lag window below
+        covers), so a cursor does not move past them. The cursor is
+        opaque but names a place in that order, not a row: it survives restarts, rebuilds and
+        a move to another instance.
+
+        The feed's contract is the per-owner one: stamps come from the clocks of the machines
+        that wrote, so a consumer re-reads a lag window (`since` a few minutes before the last
+        entry it processed) and dedupes by key. An entry is written before the session
+        changes, so it may name a change not made yet, or one that failed: read the session
+        for what it is now. `tombstone` and `visibility_changed` entries come through like
+        `published` ones.
+      parameters:
+        - name: after
+          in: query
+          description: The last page's `cursor`.
+          schema: { type: string }
+        - name: since
+          in: query
+          description: |
+            Start at this time instead (RFC 3339): entries stamped at or after it. Ignored when
+            `after` is given.
+          schema: { type: string, format: date-time }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 100 }
+      responses:
+        "200":
+          description: A page of the feed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AllChangesPage" }
+        "400":
+          description: |
+            `bad_query`: a cursor this feed did not give, a `since` that is not a time, a
+            `limit` that is not a whole number, or `owner` (this feed is every owner's).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: "`search_disabled`: this server has `search.enabled = false`, and the feed is read from the index."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          description: |
+            `index_building`: this instance's index has not read every owner's feed yet (it was
+            just started, or wiped). `Retry-After` says when to ask again.
+          headers:
+            Retry-After:
+              description: Seconds to wait.
+              schema: { type: integer }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /v1/tokens:
+    post:
+      tags: [tokens]
+      summary: Create a seshi token.
+      operationId: createToken
+      description: |
+        Needs `tokens:admin` (X5.9). `org`: an org key (with `auth.org_key.enabled`). `admin`
+        and `device`: a person's token (`owner`); a device token lasts 90 days unless
+        `expires_at` says otherwise. `service`: a service account `svc:<service>` that reads
+        (`["sessions:read", "search"]`, the default) or writes (`["sessions:write"]`, for a
+        configured source's id), never both. The token is shown once; only its hash is stored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TokenRequest" }
+      responses:
+        "201":
+          description: The token and its record.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token, record]
+                properties:
+                  token:
+                    type: string
+                    description: "`seshi_<id>_<secret>`. Shown once."
+                  record: { $ref: "#/components/schemas/TokenInfo" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "502": { $ref: "#/components/responses/StorageError" }
+    get:
+      tags: [tokens]
+      summary: List token records.
+      operationId: listTokens
+      description: Needs `tokens:admin`. Live tokens unless `all=true`; never a hash.
+      parameters:
+        - name: owner
+          in: query
+          schema: { type: string }
+        - name: kind
+          in: query
+          schema: { $ref: "#/components/schemas/TokenKind" }
+        - name: all
+          in: query
+          description: Revoked and expired tokens too.
+          schema: { type: string, enum: ["true", "false"] }
+      responses:
+        "200":
+          description: The records.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tokens]
+                properties:
+                  tokens:
+                    type: array
+                    items: { $ref: "#/components/schemas/TokenInfo" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/tokens/revoke:
+    post:
+      tags: [tokens]
+      summary: Revoke every live token of an owner.
+      operationId: revokeOwnerTokens
+      description: |
+        Offboarding (X5.11): every live token of `owner`, or only those of `kind`, is revoked
+        at once. The owner's sessions stay. Needs `tokens:admin`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [owner]
+              properties:
+                owner: { type: string, minLength: 1 }
+                kind: { $ref: "#/components/schemas/TokenKind" }
+      responses:
+        "200":
+          description: The tokens revoked.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revoked]
+                properties:
+                  revoked:
+                    type: array
+                    items: { $ref: "#/components/schemas/TokenInfo" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/tokens/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      tags: [tokens]
+      summary: Revoke one token.
+      operationId: revokeToken
+      description: |
+        Marks the record revoked (If-Match). It stops working at once on this server and
+        within 30 seconds (the token cache) on any other. Needs `tokens:admin`.
+      responses:
+        "200":
+          description: The record, revoked.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token]
+                properties:
+                  token: { $ref: "#/components/schemas/TokenInfo" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: "`not_found`: no such token."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/admin/jobs:
+    get:
+      tags: [admin]
+      summary: The worker, its jobs and every source (X7.5).
+      operationId: adminJobs
+      description: |
+        Whether the worker runs (from `worker/heartbeat.json`): `running`, `stopped` (its
+        heartbeat is older than three intervals), `never`, or `several` when a second worker
+        is running (X7.3). Each job's last run, last error and backlog (checkpoint age,
+        pending markers), and each source's checkpoint, drop and failure record counts and
+        source health over the last 7 days. Any instance answers, worker or not. Needs
+        `sources:admin` (admins).
+      responses:
+        "200":
+          description: The status, read now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JobsStatus" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/redaction/rules:
+    get:
+      tags: [redaction]
+      summary: The org's redaction rule packs, for redacting before upload (F2.4).
+      operationId: redactionRules
+      description: |
+        The operator's rule packs (`[redaction] packs`), as validated data, for a client that
+        applies them before a transcript leaves the machine. The built-in pack is not sent: the
+        client has its own, and compares `rule_set` with the hash of the rule set it builds to
+        tell whether its built-ins are the server's. The server redacts everything it receives
+        whatever the client did. Any signed-in caller, a write-only device token included; the
+        packs may describe what the org considers secret, so they are not public. The `ETag` is
+        the rule-set hash: sent back as `If-None-Match`, it gets 304 until the packs change
+        (they change when the server reloads or restarts with new packs, F1.5).
+      parameters:
+        - name: If-None-Match
+          in: header
+          required: false
+          description: The `ETag` of an earlier answer.
+          schema: { type: string }
+      responses:
+        "200":
+          description: The packs.
+          headers:
+            ETag:
+              description: The rule-set hash, quoted.
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RedactionRules" }
+        "304":
+          description: The packs are the ones the `If-None-Match` ETag names.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/capture/rules:
+    get:
+      tags: [capture]
+      summary: The org's capture rules, which laptops apply before upload.
+      operationId: captureRules
+      description: |
+        The org's exclude list (`[capture] exclude` in the server's config, every file's
+        entries, drop-ins in `seshi.d/` included), as written, with blank entries and `#`
+        comments left out. A laptop's uploader fetches it, keeps it with its `ETag`, and applies
+        it together with its own `capture.exclude`: a session in a listed repository or folder
+        is never uploaded. Until a laptop holds a copy from this server, its uploads to this
+        server wait; a later fetch that fails keeps the copy in use. The server applies the
+        repository entries itself to its own sources (a Cursor Cloud agent in a listed
+        repository is never read). A reload (`POST /v1/admin/reload`) changes the list at once.
+        Any signed-in caller, a write-only device token included. The `ETag` is a hash of the
+        document: sent back as `If-None-Match`, it gets 304 until the list changes. A server
+        older than this route answers 404: a laptop then applies only its own list.
+
+        With it, the org's tool-call redaction list (`[capture] redact_tool_calls`), the same
+        way: a laptop uploads a session in a listed repository or folder with every tool call's
+        input and output replaced by `[redacted:tool-call]`, and the server redacts the records
+        of its own sources' sessions and of any upload whose `repo` an entry names. A server
+        older than that list leaves it out.
+      parameters:
+        - name: If-None-Match
+          in: header
+          required: false
+          description: The `ETag` of an earlier answer.
+          schema: { type: string }
+      responses:
+        "200":
+          description: The rules.
+          headers:
+            ETag:
+              description: A hash of the document, quoted.
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CaptureRules" }
+        "304":
+          description: The rules are the ones the `If-None-Match` ETag names.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /v1/sessions/{format}/{session_id}/reviews:
+    parameters:
+      - $ref: "#/components/parameters/format"
+      - $ref: "#/components/parameters/session_id"
+      - $ref: "#/components/parameters/owner"
+    get:
+      tags: [sessions]
+      summary: What model review decided for each stored write of the session (F3.8).
+      operationId: sessionReviews
+      description: |
+        One entry per write that model review saw and that was stored, in order
+        (`review/<n>.json`). Admins get the whole audit record: the policy and its hash, both
+        models, the findings by record, field and category (never the text), and why review
+        was skipped. Anyone else who may read the session gets only `n`, `at`, `content_hash`
+        and `decision` (`allow`, `redact` or `skipped`). Writes no policy covered have no
+        entry. Envelopes review dropped left nothing in the session (a dropped first upload
+        only a stub, which is `404` here); they are drop records (`seshi sync dropped`). Its
+        own sessions' any credential reads; another owner's need `sessions:read` (X5.10).
+      responses:
+        "200":
+          description: The decisions, oldest first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReviewsPage" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /otlp/v1/traces:
+    post:
+      tags: [otlp]
+      summary: OTLP/HTTP trace ingest (F4).
+      operationId: otlpTraces
+      description: |
+        Where an OTLP exporter, such as a Claude Console destination, sends spans: its endpoint
+        is `https://<seshi>/otlp` and it appends `/v1/traces` (OTLP's own version, outside
+        seshi's `/v1`, F4.1). The body is an `ExportTraceServiceRequest` as protobuf
+        (`application/x-protobuf`, what the Console sends) or in OTLP's JSON mapping
+        (`application/json`), optionally `Content-Encoding: gzip`; the answer is in the same
+        encoding.
+
+        The caller is the destination: a service token for an `otlp` source in `[[sources]]`
+        with scope `sessions:write` (`POST /v1/tokens {kind: service, service: <source id>,
+        scopes: [sessions:write]}`, F4.2). Its sessions belong to `svc:<source id>` and take
+        the source's visibility. Spans are grouped into sessions by `anthropic.session.id`,
+        else `gen_ai.conversation.id`, else the trace id (F4.3), normalized and redacted on
+        arrival into the span store, and answered once stored (X4.4); the session is
+        assembled and published once its spans have been quiet for the source's
+        `quiet_period`, or shortly after a final span (F4.4). A span sent twice is kept once.
+
+        A batch where no span carries prompt or response content (a destination in
+        "Metadata only" mode) is answered `200` with `partial_success` rejecting every span and
+        a message saying to switch the destination to full content; nothing is stored (F4.5).
+        Spans that cannot be read (no valid ids or start time) are rejected the same way while
+        the rest are stored. Errors are a `google.rpc.Status` (`code`, `message`).
+      security:
+        - bearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              description: An `ExportTraceServiceRequest` in OTLP's JSON mapping.
+              type: object
+              properties:
+                resourceSpans: { type: array, items: { type: object } }
+          application/x-protobuf:
+            schema:
+              description: An `ExportTraceServiceRequest`, protobuf-encoded.
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: |
+            Accepted. `partialSuccess` (`partial_success` in protobuf) is present when spans were
+            rejected: how many, and why.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OtlpExportResponse" }
+            application/x-protobuf:
+              schema: { type: string, format: binary }
+        "400":
+          description: The body is not an `ExportTraceServiceRequest`, or not valid gzip.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OtlpStatus" }
+        "401":
+          description: No credential, or not one the server accepts.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OtlpStatus" }
+        "403":
+          description: |
+            The credential is not a writing service token for an enabled `otlp` source.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OtlpStatus" }
+        "413":
+          description: |
+            The request body is over an OTLP cap (F4.1): `limits.max_otlp_bytes` as sent (64 MiB
+            by default; a larger `Content-Length` is refused before reading), or, gzipped,
+            `limits.max_otlp_inflated_bytes` once inflated (256 MiB; inflating stops there). The
+            message names the key. Nothing of the request is stored; send smaller batches.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OtlpStatus" }
+        "415":
+          description: A `Content-Type` other than `application/x-protobuf` or `application/json`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OtlpStatus" }
+        "503":
+          description: The bucket failed. Exporters retry; spans already stored are kept once.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OtlpStatus" }
+
+  /v1/search:
+    get:
+      tags: [search]
+      summary: Keyword search over the sessions the caller may read (F10).
+      operationId: search
+      description: |
+        Finds sessions by what was said and done in them: prompts, assistant text, and tool
+        calls (names and inputs, so file paths and commands) by default (`search.events`).
+        Each result is a session with its best matching records, each with the trace and
+        event it is in (`GET …/trace?hash=` holds it at `events[event_index]`) and a short
+        snippet with the matched words' offsets.
+
+        With the `search` scope, a member finds their own sessions and those visible to the
+        org; admins and services that read find everything (X5.10). Without it (a device token,
+        a service that only writes), a credential finds only its own owner's sessions: the
+        server sets `owner` to the credential's own, and `owner` naming anyone else is `403`.
+        The server adds that filter from the credential; no parameter widens it (F10.4), and
+        every result is checked against the session's current visibility before it is
+        returned.
+
+        Every instance that serves search keeps its own index, built from the change feed
+        (F10.2, F10.3), so a session appears within the indexer's interval of being stored.
+        A new or wiped instance answers `503` until its index has caught up.
+
+        `q` takes words (all must appear in one record), `"a phrase"`, `word*` (a prefix), `a OR b`, and
+        `-word` or `NOT word` (excluded). Case and accents are ignored; punctuation separates
+        words, so `src/app.ts` matches those words in that order.
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: What to search for (up to 1000 characters, 32 words and phrases).
+          schema: { type: string, minLength: 1, maxLength: 1000 }
+        - name: owner
+          in: query
+          description: |
+            Only this owner's sessions (`[auth.owner_aliases]` folded in). Without the
+            `search` scope, only the caller's own owner (the default); any other is `403`.
+          schema: { $ref: "#/components/schemas/Owner" }
+        - name: agent
+          in: query
+          description: Only sessions filed under this format or run by this agent (`origin_agent`).
+          schema: { type: string, maxLength: 512 }
+        - name: repo
+          in: query
+          description: |
+            Only sessions of this repository: the session's `repo` (its normalized remote),
+            exactly (ignoring case) or as its last path segments (`widget` and `acme/widget`
+            match `github.com/acme/widget`). A session without a `repo` (no remote) never
+            matches.
+          schema: { type: string, maxLength: 512 }
+        - name: branch
+          in: query
+          schema: { type: string, maxLength: 512 }
+        - name: harness
+          in: query
+          description: Only sessions run by this harness, the meta record's `source` (`claude-code`, `codex`, `cursor`).
+          schema: { type: string, maxLength: 512 }
+        - name: agent_version
+          in: query
+          description: Only sessions with this `agent_version`, the version of their harness they started on (for a hinted harness such as Cursor, the version at their latest upload).
+          schema: { type: string, maxLength: 512 }
+        - name: model
+          in: query
+          description: Only sessions that used this model, among every model they used.
+          schema: { type: string, maxLength: 512 }
+        - name: label
+          in: query
+          description: |
+            Only sessions carrying this label, as `key=value` (`label=dosu.project=github.com/acme/app`):
+            the key and the value exactly. Repeat it for more; a session must carry every one.
+          style: form
+          explode: true
+          schema:
+            type: array
+            maxItems: 32
+            items: { type: string, maxLength: 1024 }
+        - name: source
+          in: query
+          description: Only sessions written through this source (`upload`, or a configured source id).
+          schema: { type: string, maxLength: 512 }
+        - name: role
+          in: query
+          description: |
+            Only records of these roles, comma-separated: `tool_result` for tool output, `user`
+            for prompts. One the server does not know is refused (400 `bad_query`).
+          schema: { type: string, maxLength: 512, example: "tool_result,observation" }
+        - name: since
+          in: query
+          description: |
+            Only records at or after this time. A record without a timestamp counts at its
+            session's last update.
+          schema: { type: string, format: date-time }
+        - name: until
+          in: query
+          description: Only records at or before this time.
+          schema: { type: string, format: date-time }
+        - name: sort
+          in: query
+          description: "`relevance` (bm25 over the matching records, best first) or `recent` (most recently updated sessions first)."
+          schema: { type: string, enum: [relevance, recent], default: relevance }
+        - name: limit
+          in: query
+          description: Sessions per page; larger values are capped at 100.
+          schema: { type: integer, minimum: 1, default: 20 }
+        - name: matches
+          in: query
+          description: Matching records per session; larger values are capped at 20.
+          schema: { type: integer, minimum: 0, default: 3 }
+        - name: cursor
+          in: query
+          description: The previous page's `cursor`.
+          schema: { type: string }
+      responses:
+        "200":
+          description: The sessions that match, best first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SearchResults" }
+        "400":
+          description: |
+            `bad_query`: no words to look for, an unknown or repeated parameter, a value that is
+            not one (an owner id, a time, a number), `since` after `until`, a cursor this server
+            did not give.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: "`search_disabled`: this server has `search.enabled = false`."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502": { $ref: "#/components/responses/StorageError" }
+        "503":
+          description: |
+            `index_building`: this instance's index has not caught up with the change feed yet
+            (it was just started, or wiped). `Retry-After` says when to ask again.
+          headers:
+            Retry-After:
+              description: Seconds to wait.
+              schema: { type: integer }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /v1/search/sessions:
+    get:
+      tags: [search]
+      summary: Sessions by who, where and when, with no search words (`list_sessions`).
+      operationId: searchSessions
+      description: |
+        The sessions the caller may read that overlap a window (the last 7 days by default),
+        newest first by `updated_at`, from the search index's sessions. Who may see what is as
+        for `GET /v1/search`, and each session is checked against its current metadata before
+        it is returned. A session overlaps the window when it started (its earliest event, or
+        its last update) at or before `until` and ended (its latest event, or its last update)
+        at or after `since`.
+      parameters:
+        - name: owner
+          in: query
+          description: |
+            Only this owner's sessions (`[auth.owner_aliases]` folded in). Without the
+            `search` scope, only the caller's own owner (the default); any other is `403`.
+          schema: { $ref: "#/components/schemas/Owner" }
+        - name: agent
+          in: query
+          description: Only sessions filed under this format or run by this agent (`origin_agent`).
+          schema: { type: string, maxLength: 512 }
+        - name: repo
+          in: query
+          description: As for `GET /v1/search`.
+          schema: { type: string, maxLength: 512 }
+        - name: branch
+          in: query
+          schema: { type: string, maxLength: 512 }
+        - name: harness
+          in: query
+          schema: { type: string, maxLength: 512 }
+        - name: agent_version
+          in: query
+          schema: { type: string, maxLength: 512 }
+        - name: model
+          in: query
+          schema: { type: string, maxLength: 512 }
+        - name: label
+          in: query
+          description: A label as `key=value`; repeat it for more. A session must carry every one.
+          style: form
+          explode: true
+          schema:
+            type: array
+            maxItems: 32
+            items: { type: string, maxLength: 1024 }
+        - name: source
+          in: query
+          schema: { type: string, maxLength: 512 }
+        - name: since
+          in: query
+          description: The window's start, as a time or an age back from now (`7d`, `24h`); 7 days ago by default.
+          schema: { type: string }
+        - name: until
+          in: query
+          description: The window's end, as a time or an age; now by default.
+          schema: { type: string }
+        - name: limit
+          in: query
+          description: Sessions per page; larger values are capped at 100.
+          schema: { type: integer, minimum: 1, default: 20 }
+        - name: after
+          in: query
+          description: The previous page's `cursor`.
+          schema: { type: string }
+      responses:
+        "200":
+          description: The sessions, newest first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionList" }
+        "400":
+          description: |
+            `bad_query`: an unknown or repeated parameter, a value that is not one (an owner id,
+            a time or age, a number), `since` after `until`, a cursor this server did not give.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: "`search_disabled`: this server has `search.enabled = false`."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502": { $ref: "#/components/responses/StorageError" }
+        "503":
+          description: "`index_building`: as for `GET /v1/search`."
+          headers:
+            Retry-After:
+              description: Seconds to wait.
+              schema: { type: integer }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /v1/admin/sources:
+    get:
+      tags: [admin]
+      summary: Every configured source and `upload` (X4.8, X6.4).
+      operationId: adminSources
+      description: |
+        Each source's checkpoint, drop and failure record counts, and source health summed
+        over the last `days` days. `seshi sync status` reads it from a machine without the
+        server's config. Needs `sources:admin` (admins).
+      parameters:
+        - $ref: "#/components/parameters/days"
+      responses:
+        "200":
+          description: The sources, read now.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sources]
+                properties:
+                  sources:
+                    type: array
+                    items: { $ref: "#/components/schemas/SourceStatus" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/admin/sources/{id}:
+    get:
+      tags: [admin]
+      summary: One source's checkpoint, record counts and health.
+      operationId: adminSource
+      description: |
+        Needs `sources:admin`. `upload` is the source of hooks and `seshi upload`. `managed`
+        says where the source is set; a source stored in the bucket also gives its settings
+        (each secret as a `SecretView`) and its `ETag`, in the header and the body.
+      parameters:
+        - $ref: "#/components/parameters/source_id"
+        - $ref: "#/components/parameters/days"
+      responses:
+        "200":
+          description: The source, read now.
+          headers:
+            ETag:
+              description: A stored source's ETag.
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SourceDetail" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: "`unknown_source`: no configured source has this id."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502": { $ref: "#/components/responses/StorageError" }
+    put:
+      tags: [admin]
+      summary: Store a source in the bucket (runtime_config = store).
+      operationId: putAdminSource
+      description: |
+        The body is the source's settings as in `[[sources]]` (`id` may be left out). Secrets
+        sent as values are sealed under `secrets.key_id` and never returned; one left out
+        keeps its sealed value when the type stays the same; `{ env = … }` and `{ file = … }`
+        are refused, since they would read the server's own environment and files. The source is merged under the files
+        and checked as a reload would check it before it is written (422 with
+        `error.problems`), then applied here at once and on the other instances within
+        `server.config_poll`. A source in the server's files cannot be written here (409
+        `file_owned`). 201 when it was created. Needs `sources:admin`.
+      parameters:
+        - $ref: "#/components/parameters/source_id"
+        - $ref: "#/components/parameters/if_match"
+        - $ref: "#/components/parameters/if_none_match"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "200":
+          description: Replaced.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StoredSourceWrite" }
+        "201":
+          description: Created.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StoredSourceWrite" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/RuntimeConflict" }
+        "412": { $ref: "#/components/responses/PreconditionFailed" }
+        "422": { $ref: "#/components/responses/RuntimeInvalid" }
+        "502": { $ref: "#/components/responses/StorageError" }
+    delete:
+      tags: [admin]
+      summary: Remove a source stored in the bucket.
+      operationId: deleteAdminSource
+      description: |
+        Stops it here at once and on the other instances within `server.config_poll`. Its
+        sessions, checkpoint and records stay. Refused while a review policy names it (409
+        `in_use`), and for a source in the server's files (409 `file_owned`). Needs
+        `sources:admin`.
+      parameters:
+        - $ref: "#/components/parameters/source_id"
+        - $ref: "#/components/parameters/if_match"
+      responses:
+        "200":
+          description: Removed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, deleted, version]
+                properties:
+                  id: { type: string }
+                  deleted: { type: boolean }
+                  version: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: "`unknown_source`: no stored source has this id."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409": { $ref: "#/components/responses/RuntimeConflict" }
+        "412": { $ref: "#/components/responses/PreconditionFailed" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/admin/sources/{id}/{kind}:
+    get:
+      tags: [admin]
+      summary: A source's failure or drop records, oldest first (X6.4).
+      operationId: adminSourceRecords
+      description: |
+        One record per envelope that was not stored: `failed` for a permanent pipeline
+        failure (X4.8), `dropped` for a model review drop (F3.4). Each says when, which
+        session and idempotency key, and why; never the content. A source no longer in
+        `[[sources]]` keeps its records until retention prunes them, so they can be read.
+        `seshi sync failed|dropped` reads it. Needs `sources:admin`.
+      parameters:
+        - $ref: "#/components/parameters/source_id"
+        - name: kind
+          in: path
+          required: true
+          schema: { enum: [failed, dropped] }
+        - name: since
+          in: query
+          required: false
+          description: Only records at or after this time. Ignored with `after`.
+          schema: { type: string, format: date-time }
+        - name: after
+          in: query
+          required: false
+          description: The `cursor` of the last page.
+          schema: { type: string }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 1000, default: 50 }
+      responses:
+        "200":
+          description: A page of records.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecordsPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: "`unknown_source`: no such source, configured or with records."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/admin/config:
+    get:
+      tags: [admin]
+      summary: The runtime config in the bucket, and which instances run it.
+      operationId: adminConfig
+      description: |
+        With `server.runtime_config = store` (docs/config.md, "Runtime config in the bucket"):
+        the bucket's runtime config version, the one this instance runs, each live instance
+        and whether it runs the bucket's version, `config/seshi.toml` as stored (its `ETag` in
+        the header) and the other files under `config/`, the settings the server's files set
+        (locked against changes here), and the data policy now in effect. On a file-only
+        server, `runtime_config` is `file` and only `effective` is given. Needs
+        `sources:admin`.
+      parameters:
+        - name: wait
+          in: query
+          required: false
+          description: |
+            Wait up to this long (a duration such as `10s`, at most 60s) for every live
+            instance to run the bucket's version; `converged` says whether they do.
+          schema: { type: string }
+      responses:
+        "200":
+          description: The runtime config, read now.
+          headers:
+            ETag:
+              description: "`config/seshi.toml`'s ETag; absent when the bucket has none."
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RuntimeConfigStatus" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "502": { $ref: "#/components/responses/StorageError" }
+    patch:
+      tags: [admin]
+      summary: Change data-policy settings in the bucket's config/seshi.toml.
+      operationId: patchAdminConfig
+      description: |
+        `set` maps dotted paths under the runtime sections (`default_visibility`, `filter`,
+        `redaction`, `review`, `records`, `capture`) to values; `unset` removes paths. A
+        setting the server's files set is locked (409 `locked`); a list adds to the files'
+        entries. The result is merged under the files and checked as a reload would check it
+        before it is written (422 with `error.problems`), then written with the condition
+        given and applied on this instance at once; the others apply it within
+        `server.config_poll`. Review keys must be `{ env = "NAME" }` references. The file is
+        rewritten, so comments in it are not kept. Needs `sources:admin`.
+      parameters:
+        - $ref: "#/components/parameters/if_match"
+        - $ref: "#/components/parameters/if_none_match"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                set:
+                  type: object
+                  additionalProperties: true
+                  description: Dotted path = value.
+                unset:
+                  type: array
+                  items: { type: string }
+      responses:
+        "200":
+          description: Written and applied here.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RuntimeWrite" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/RuntimeConflict" }
+        "412": { $ref: "#/components/responses/PreconditionFailed" }
+        "422": { $ref: "#/components/responses/RuntimeInvalid" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/admin/config/files/{name}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        description: A file under `config/` (`packs/org.json`), percent-encoded; not `seshi.toml`.
+        schema: { type: string, minLength: 1 }
+    put:
+      tags: [admin]
+      summary: Write a file under config/ (a rule pack, a review prompt).
+      operationId: putAdminConfigFile
+      description: |
+        The body is the file. A pack under `packs/` is compiled and its test strings run;
+        when `config/seshi.toml` names the file, the result is also checked as a reload would
+        check it. Both before it is written; then applied here at once. Needs `sources:admin`.
+      parameters:
+        - $ref: "#/components/parameters/if_match"
+        - $ref: "#/components/parameters/if_none_match"
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        "200":
+          description: Written and applied here.
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RuntimeFileWrite" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/RuntimeConflict" }
+        "412": { $ref: "#/components/responses/PreconditionFailed" }
+        "422": { $ref: "#/components/responses/RuntimeInvalid" }
+        "502": { $ref: "#/components/responses/StorageError" }
+    delete:
+      tags: [admin]
+      summary: Remove a file under config/.
+      operationId: deleteAdminConfigFile
+      description: |
+        Refused (409 `in_use`, with `error.problems`) while the config needs it: the config
+        without it is checked as a reload would check it. Needs `sources:admin`.
+      parameters:
+        - $ref: "#/components/parameters/if_match"
+      responses:
+        "200":
+          description: Removed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RuntimeFileWrite" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: "`no_such_file`: no such file under `config/`."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409": { $ref: "#/components/responses/RuntimeConflict" }
+        "412": { $ref: "#/components/responses/PreconditionFailed" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/admin/secrets/reseal:
+    post:
+      tags: [admin]
+      summary: Seal every stored source's secrets again with the current key.
+      operationId: resealSecrets
+      description: |
+        After `secrets.key_id` names a new key: each stored source sealed with another key is
+        rewritten (each with `If-Match`; one changed meanwhile is skipped and named in
+        `changed`). Run it, then remove the old key. Needs `sources:admin`.
+      responses:
+        "200":
+          description: What was resealed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ResealResult" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/RuntimeConflict" }
+        "422": { $ref: "#/components/responses/RuntimeInvalid" }
+        "502": { $ref: "#/components/responses/StorageError" }
+
+  /v1/admin/reload:
+    get:
+      tags: [admin]
+      summary: The running config's generation and hash, and the last reload (F1.5).
+      operationId: adminReloadStatus
+      description: |
+        Which config is running: its `generation` (1 at start-up, one more for each reload that
+        changed something), a hash of it (secrets hashed, never shown), the redaction rule
+        set's hash (the `ETag` of `GET /v1/redaction/rules`), when it was loaded, the settings
+        the files change that wait for a restart, and how the last reload went. A program that
+        writes the config (an admin UI) reads it to confirm a change took effect. Needs
+        `sources:admin` (admins).
+      responses:
+        "200":
+          description: The status, read now.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConfigStatus" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [admin]
+      summary: Read the config files again and apply them, all or nothing (F1.5).
+      operationId: adminReload
+      description: |
+        Does what `SIGHUP` does, and answers with the result. The config file, its drop-ins
+        (`seshi.d/*.toml`), the redaction packs and the review policies' prompt files are read
+        and checked, and the packs compiled, before anything changes; on any error the running config stays and the
+        answer is 422 with the reasons. Then sources are compared by id: an added one starts
+        polling, a removed one stops, a changed one restarts, an unchanged one keeps running.
+        Checkpoints are never reset. New writes redact with the new packs; a write already
+        going finishes with the packs it started with. Settings only a restart applies
+        (`[server]`, `[store]`, `[auth]`, `[limits]`, `[search]`, `[worker]`) keep their
+        running values and are listed in `restart_required`. Reloads run one at a time. The
+        config itself is not sent: the files are the source of truth. Needs `sources:admin`.
+      responses:
+        "200":
+          description: Applied, or nothing changed (`reload.outcome`).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [reload, config]
+                properties:
+                  reload: { $ref: "#/components/schemas/ReloadReport" }
+                  config: { $ref: "#/components/schemas/ConfigStatus" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: "`not_reloadable`: the server was started without a config file to read again."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422":
+          description: |
+            `reload_rejected`: the files did not load or check; nothing changed. `reload.errors`
+            lists each problem.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Error"
+                  - type: object
+                    required: [reload, config]
+                    properties:
+                      reload: { $ref: "#/components/schemas/ReloadReport" }
+                      config: { $ref: "#/components/schemas/ConfigStatus" }
+
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      description: |
+        A seshi token (`seshi_<id>_<secret>`: the org key, an admin, device or service token),
+        a session token the server signed (a JWT from `/v1/auth/exchange`), or a static token
+        from `auth.tokens` (16+ characters). With the org key, `X-Seshi-User` names the
+        caller (X5.12). There are no shared-secret tokens (X5.2).
+
+  parameters:
+    if_match:
+      name: If-Match
+      in: header
+      required: false
+      description: The `ETag` read; the write is refused (412) when the object changed since.
+      schema: { type: string }
+    if_none_match:
+      name: If-None-Match
+      in: header
+      required: false
+      description: "`*`: create only; refused (412) when it exists."
+      schema: { type: string, enum: ["*"] }
+    format:
+      name: format
+      in: path
+      required: true
+      description: |
+        The format the session is filed under, as its metadata's `format` and its change
+        entries name it: a format `POST /v1/sessions` takes (`claude-code`, `codex`, …) or
+        one another route files sessions under (`otlp-genai`, `cursor-cloud-api`, …).
+      schema: { type: string, minLength: 1 }
+    owner_folder:
+      name: owner
+      in: path
+      required: true
+      description: |
+        The owner whose folder holds the session, as change entries, search results and
+        session listings name it: that folder exactly, with no `[auth.owner_aliases]` folded in.
+      schema: { $ref: "#/components/schemas/Owner" }
+    archive_id:
+      name: archive_id
+      in: path
+      required: true
+      description: |
+        The session's archive id, `sha256(owner + "\n" + format + "\n" + session_id)`, as its
+        metadata, change entries and search results name it.
+      schema: { $ref: "#/components/schemas/Sha256" }
+    session_id:
+      name: session_id
+      in: path
+      required: true
+      description: The harness's own id for the session.
+      schema: { type: string, minLength: 1 }
+    owner:
+      name: owner
+      in: query
+      required: false
+      description: Whose session(s); the caller's own by default (X5.10).
+      schema: { $ref: "#/components/schemas/Owner" }
+    source_id:
+      name: id
+      in: path
+      required: true
+      description: A source id from `[[sources]]`, or `upload`.
+      schema: { type: string, minLength: 1 }
+    days:
+      name: days
+      in: query
+      required: false
+      description: How many days of source health to sum (up to 90).
+      schema: { type: integer, minimum: 1, default: 7 }
+
+  responses:
+    RuntimeConflict:
+      description: |
+        `runtime_config_off` (the server's config is file-only), `locked` (the server's files
+        set it), `file_owned` (a source in the server's files) or `in_use` (something still
+        names it).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    RuntimeInvalid:
+      description: |
+        `invalid`: the change would not load or check; nothing was written. `error.problems`
+        lists each problem. `sealing`: a secret cannot be sealed (no key in `[secrets]`).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    PreconditionFailed:
+      description: |
+        `precondition_failed`: it changed since the `If-Match` ETag was read, or exists despite
+        `If-None-Match: *`. Read it again and redo the change.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    BadRequest:
+      description: |
+        The request is malformed: not JSON, a missing or mistyped field, a bad query value,
+        a `Content-Encoding: gzip` body that is not gzip. `code` is one of `bad_json`,
+        `missing_field`, `bad_field`, `bad_query`, `bad_encoding`.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    UnsupportedEncoding:
+      description: |
+        A `Content-Encoding` other than `gzip` or `identity`; the body was not read. `code` is
+        `unsupported_encoding`.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: |
+        No credential, or not one the server accepts: unknown, expired or revoked, or the
+        org key without `X-Seshi-User` on a route the org key may use (elsewhere it is 403).
+        `code` is `unauthorized`.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Forbidden:
+      description: |
+        The credential cannot do this: it lacks the scope the call needs (a device token
+        reads nothing, the org key deletes nothing), or the session is not the caller's and
+        the caller is not an admin, or a delete with a session token older than 10 minutes
+        (X5.3). `code` is `forbidden`.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: |
+        No such session for this owner, or one the caller may not read (X5.10). `code` is
+        `not_found`.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    StorageError:
+      description: The bucket failed. Retryable. `code` is `storage_error`.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Format:
+      type: string
+      description: |
+        A transcript format, by its trajectory source name: one spelling, since the archive id
+        derives from it. `datadog-trajectory` is a Datadog Trajectory session file, whichever
+        client the daemon captured. `atif` is an ATIF-v1.0 through ATIF-v1.8 document (Harbor's
+        Agent Trajectory Interchange Format), whichever harness exported it; it is sent whole,
+        as `json`, and its trace's `source` is the document's `agent.name`. `trajectory` is
+        JSONL of records already in Letta trajectory-v1, checked and redacted, not normalized.
+      enum: [claude-code, codex, cursor, opencode, pi, gemini-cli, atif, datadog-trajectory, trajectory]
+
+    Labels:
+      type: object
+      description: |
+        Small key/value strings attached to a session from config (the CLI's `[labels]`, a
+        repo's `.seshi/config.toml`, a source's `labels`); seshi gives them no meaning. Keys
+        `[a-z0-9][a-z0-9._-]{0,63}`, values 1 to 512 characters, at most 32.
+      propertyNames: { pattern: "^[a-z0-9][a-z0-9._-]{0,63}$" }
+      maxProperties: 32
+      additionalProperties: { type: string, minLength: 1, maxLength: 512 }
+
+    Owner:
+      type: string
+      description: |
+        An owner ID (X5.8), one path segment: a person's (a username, an email or an IdP
+        subject) or a service account's, `svc:<source-id>` (X5.4).
+      pattern: "^([A-Za-z0-9][A-Za-z0-9._@+-]{0,127}|svc:[a-z0-9]+(-[a-z0-9]+)*)$"
+
+    Visibility:
+      type: string
+      enum: [org, owner]
+      description: "`org`: every member reads it. `owner`: only its owner (admins and services read everything)."
+
+    Scope:
+      type: string
+      enum: [sessions:write, sessions:read, sessions:delete, search, sources:admin, tokens:admin]
+
+    TokenKind:
+      type: string
+      enum: [org, admin, device, service]
+
+    AuthConfig:
+      type: object
+      required: [version, org_key, oidc, session_token_seconds, delete_fresh_seconds]
+      properties:
+        version: { type: string }
+        org_key:
+          type: boolean
+          description: The org key is accepted (X5.12).
+        oidc:
+          description: The IdP to sign in through, or null without one.
+          oneOf:
+            - type: "null"
+            - type: object
+              required: [issuer, client_id, audience, scopes]
+              properties:
+                issuer: { type: string }
+                client_id: { type: string }
+                audience: { type: string }
+                scopes:
+                  type: array
+                  items: { type: string }
+        session_token_seconds: { type: integer }
+        delete_fresh_seconds:
+          type: integer
+          description: How recent a session token must be to delete.
+
+    ExchangeRequest:
+      type: object
+      required: [id_token]
+      properties:
+        id_token:
+          type: string
+          description: The IdP's ID token, fresh from sign-in.
+        nonce:
+          type: string
+          description: The nonce the CLI put in its sign-in request.
+        machine:
+          type: object
+          description: The first sign-in from this machine, or a renewal of its device token.
+          required: [id]
+          properties:
+            id: { type: string, pattern: "^[A-Za-z0-9._:-]{1,128}$" }
+            name: { type: string }
+        visibility: { $ref: "#/components/schemas/Visibility" }
+
+    ExchangeResult:
+      type: object
+      required: [session_token, expires_at, owner, role, scopes]
+      properties:
+        session_token:
+          type: string
+          description: Signed by the server; one hour.
+        expires_at: { type: string, format: date-time }
+        owner: { $ref: "#/components/schemas/Owner" }
+        role: { type: string, enum: [member, admin] }
+        scopes:
+          type: array
+          items: { $ref: "#/components/schemas/Scope" }
+        device_token:
+          type: object
+          required: [token, id, expires_at]
+          properties:
+            token: { type: string, description: Shown once. }
+            id: { type: string }
+            expires_at: { type: string, format: date-time }
+
+    TokenRequest:
+      type: object
+      required: [kind]
+      properties:
+        kind: { $ref: "#/components/schemas/TokenKind" }
+        owner:
+          type: string
+          description: The person, for `admin` and `device`.
+        service:
+          type: string
+          description: For `service`, the account `svc:<service>`; a configured source's id to write.
+        scopes:
+          type: array
+          items: { $ref: "#/components/schemas/Scope" }
+        visibility: { $ref: "#/components/schemas/Visibility" }
+        expires_at: { type: string, format: date-time }
+        label: { type: string }
+
+    TokenInfo:
+      type: object
+      description: "`tokens/<id>.json` without its hash."
+      required: [schema, id, kind, owner, scopes, created_at, expires_at, revoked]
+      properties:
+        schema: { const: seshi/token/1 }
+        id: { type: string }
+        kind: { $ref: "#/components/schemas/TokenKind" }
+        owner:
+          type: string
+          description: The owner ID, or `*` for the org key.
+        scopes:
+          type: array
+          items: { $ref: "#/components/schemas/Scope" }
+        visibility: { $ref: "#/components/schemas/Visibility" }
+        owner_basis: { type: string, enum: [verified, claimed, service] }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: [string, "null"], format: date-time }
+        revoked: { type: boolean }
+        revoked_at: { type: string, format: date-time }
+        label: { type: string }
+        created_by: { type: object }
+        machine: { type: object }
+        claims: { type: object }
+
+    OwnersPage:
+      type: object
+      required: [owners, truncated]
+      properties:
+        owners:
+          type: array
+          items: { $ref: "#/components/schemas/Owner" }
+        cursor:
+          type: string
+          description: Pass as `after` for the next page.
+        truncated: { type: boolean }
+
+    Sha256:
+      type: string
+      pattern: "^[0-9a-f]{64}$"
+
+    JobRecord:
+      type: object
+      description: One job's last runs, as the process that ran it recorded them.
+      required: [runs, failures]
+      properties:
+        last_started: { type: string, format: date-time }
+        last_finished: { type: string, format: date-time }
+        last_outcome: { enum: [ok, error, discarded] }
+        last_ok: { type: string, format: date-time }
+        last_error:
+          type: object
+          required: [at, message]
+          properties:
+            at: { type: string, format: date-time }
+            message: { type: string }
+        runs: { type: integer, minimum: 0 }
+        failures: { type: integer, minimum: 0 }
+        last_summary:
+          type: object
+          additionalProperties: { type: number }
+    ReloadReport:
+      type: object
+      description: One config reload (F1.5).
+      required:
+        [trigger, started_at, finished_at, outcome, generation, config_hash, rule_set, review_set, changed, restart_required]
+      properties:
+        trigger:
+          enum: [signal, api, watch, manual]
+          description: "`signal` (SIGHUP), `api` (POST /v1/admin/reload), `watch` (`server.watch_config`)."
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+        outcome:
+          enum: [applied, unchanged, rejected]
+          description: |
+            `applied`: the running config changed and `generation` went up. `unchanged`: the
+            files say what runs. `rejected`: something did not load or check; nothing changed.
+        generation: { type: integer, minimum: 1, description: The generation running after it. }
+        config_hash: { type: string }
+        rule_set: { type: string }
+        review_set: { type: [string, "null"] }
+        errors:
+          type: array
+          items: { type: string }
+          description: Why it was rejected, one problem each.
+        changed:
+          type: array
+          items: { type: string }
+          description: The live sections that changed (`sources`, `redaction`, `review`…).
+        sources:
+          type: object
+          description: The sources by id.
+          required: [added, removed, changed, unchanged]
+          properties:
+            added: { type: array, items: { type: string } }
+            removed: { type: array, items: { type: string } }
+            changed: { type: array, items: { type: string } }
+            unchanged: { type: array, items: { type: string } }
+        restart_required:
+          type: array
+          items: { type: string }
+          description: Settings the files change that only a restart applies (`server.listen`).
+    ConfigStatus:
+      type: object
+      description: The running config (F1.5).
+      required:
+        [generation, config_hash, rule_set, review_set, loaded_at, reloadable, restart_required, last_reload, live_sections, restart_only_sections]
+      properties:
+        generation: { type: integer, minimum: 1 }
+        config_hash:
+          type: string
+          description: A hash of the running config; secrets are hashed, never shown.
+        rule_set:
+          type: string
+          description: The redaction rule set's hash, the `ETag` of `GET /v1/redaction/rules`.
+        review_set:
+          type: [string, "null"]
+          description: |
+            A hash of the running review policies' hashes. Each covers its prompt text, so an
+            edited `prompt_file` changes it where `config_hash` does not. Null for a reviewer
+            seshi did not build from `[review]`.
+        loaded_at: { type: string, format: date-time }
+        reloadable:
+          type: boolean
+          description: False when the server was started without a config file.
+        restart_required:
+          type: array
+          items: { type: string }
+        last_reload:
+          oneOf:
+            - $ref: "#/components/schemas/ReloadReport"
+            - type: "null"
+        live_sections: { type: array, items: { type: string } }
+        restart_only_sections: { type: array, items: { type: string } }
+        runtime: { $ref: "#/components/schemas/RuntimeHere" }
+    RuntimeHere:
+      type: object
+      description: |
+        With `server.runtime_config = store`: the bucket's runtime config version, the one this
+        instance runs, and why they differ when they do.
+      required: [version, applied, applied_at, last_sync]
+      properties:
+        version: { type: string }
+        applied: { type: string }
+        applied_at: { type: string, format: date-time }
+        last_sync: { type: [string, "null"], format: date-time }
+        problem: { type: string }
+    RuntimeInstance:
+      type: object
+      required: [schema, instance, process, seshi, version, applied_at, at, current]
+      properties:
+        schema: { type: string, const: seshi/runtime-instance/1 }
+        instance:
+          type: string
+          description: |
+            `server.instance_id`, else the host name: stable across restarts, and shared by
+            processes on one host.
+        process:
+          type: string
+          description: |
+            This run of the server (`instance` and a random suffix), one record each; count
+            these for "applied on N of M".
+        seshi: { type: string }
+        version: { type: string }
+        applied_at: { type: string, format: date-time }
+        at: { type: string, format: date-time }
+        problem: { type: string }
+        current:
+          type: boolean
+          description: It runs the bucket's current version.
+    RuntimeConfigStatus:
+      type: object
+      required: [runtime_config, effective]
+      properties:
+        runtime_config: { type: string, enum: [file, store] }
+        version: { type: string }
+        here: { $ref: "#/components/schemas/RuntimeHere" }
+        converged: { type: boolean }
+        instances:
+          type: array
+          items: { $ref: "#/components/schemas/RuntimeInstance" }
+        doc:
+          type: object
+          required: [settings, files]
+          properties:
+            etag: { type: string }
+            settings:
+              type: object
+              additionalProperties: true
+              description: "`config/seshi.toml` as stored, its paths as written."
+            files:
+              type: array
+              items:
+                type: object
+                required: [name, etag]
+                properties:
+                  name: { type: string }
+                  etag: { type: string }
+        locked:
+          type: array
+          items: { type: string }
+          description: Settings the server's files set, which cannot be changed here.
+        effective:
+          type: object
+          additionalProperties: true
+          description: The data policy in effect on this instance (secrets masked).
+    RuntimeWrite:
+      type: object
+      required: [etag, version]
+      properties:
+        etag: { type: string }
+        version: { type: string }
+    RuntimeFileWrite:
+      type: object
+      required: [name, version]
+      properties:
+        name: { type: string }
+        etag: { type: string }
+        deleted: { type: boolean }
+        version: { type: string }
+    SecretView:
+      type: object
+      description: What may be said of a stored secret; never its value.
+      required: [set, fingerprint, key_id, updated_at]
+      properties:
+        set: { type: boolean, const: true }
+        fingerprint:
+          type: string
+          description: |
+            An HMAC of the value under the sealing key it was set with, 12 hex digits; a
+            reseal keeps it, so it changes only with the value. Sent back in a PUT, this view
+            keeps the sealed value.
+        key_id: { type: string }
+        updated_at: { type: string, format: date-time }
+    StoredSourceWrite:
+      type: object
+      required: [id, etag, source, version]
+      properties:
+        id: { type: string }
+        etag: { type: string }
+        source:
+          type: object
+          additionalProperties: true
+          description: Its settings, each sealed secret as a `SecretView`.
+        version: { type: string }
+    ResealResult:
+      type: object
+      required: [key_id, resealed, changed, current]
+      properties:
+        key_id: { type: [string, "null"] }
+        resealed: { type: array, items: { type: string } }
+        changed: { type: array, items: { type: string } }
+        current: { type: array, items: { type: string } }
+    JobsStatus:
+      type: object
+      required: [at, deployment, instance, worker, jobs, sources, warnings]
+      properties:
+        at: { type: string, format: date-time }
+        deployment: { type: string }
+        instance:
+          type: object
+          description: The instance that answered.
+          required: [id, process, roles, version]
+          properties:
+            id: { type: string }
+            process: { type: string }
+            roles: { type: array, items: { enum: [api, worker] } }
+            version: { type: string }
+        worker:
+          type: object
+          required: [state, others]
+          properties:
+            state: { enum: [running, stopped, never, several] }
+            instance: { type: string }
+            host: { type: string }
+            version: { type: string }
+            roles: { type: array, items: { type: string } }
+            started_at: { type: string, format: date-time }
+            last_heartbeat: { type: string, format: date-time }
+            age_ms: { type: integer, minimum: 0 }
+            others:
+              type: array
+              description: Other workers seen running.
+              items:
+                type: object
+                required: [instance, at]
+                properties:
+                  instance: { type: string }
+                  at: { type: string, format: date-time }
+        jobs:
+          type: array
+          items:
+            type: object
+            required: [name, kind, placement, interval_ms]
+            properties:
+              name: { type: string, description: "`heartbeat`, `retention`, `source:<id>`…" }
+              kind: { type: string, description: "`heartbeat`, `retention`, `poller`…" }
+              placement: { enum: [worker, every] }
+              interval_ms: { type: integer, minimum: 1 }
+              source: { type: string }
+              last: { $ref: "#/components/schemas/JobRecord" }
+              backlog:
+                type: object
+                additionalProperties: { type: number }
+              dropped: { type: integer, minimum: 0 }
+              failed: { type: integer, minimum: 0 }
+        sources:
+          type: array
+          items:
+            type: object
+            required: [id, type, enabled, polled, checkpoint, dropped, failed, health]
+            properties:
+              id: { type: string }
+              type: { type: string }
+              enabled: { type: boolean }
+              polled: { type: boolean }
+              connector: { type: string }
+              interval_ms: { type: integer }
+              note: { type: string }
+              checkpoint:
+                oneOf:
+                  - type: "null"
+                  - type: object
+                    required: [updated_at, cursor]
+                    properties:
+                      updated_at: { type: string, format: date-time }
+                      cursor: { type: object }
+              dropped: { type: integer, minimum: 0 }
+              failed: { type: integer, minimum: 0 }
+              health:
+                type: object
+                description: Outcome counts over the last 7 days (X4.8).
+                additionalProperties: { type: integer }
+        warnings: { type: array, items: { type: string } }
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: Stable, machine-readable; the message is for people.
+            message: { type: string }
+            problems:
+              type: array
+              items: { type: string }
+              description: Each thing wrong, one a line, when there are several.
+      example:
+        error: { code: "unauthorized", message: "a valid token is required" }
+
+    OffsetMismatch:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, expected]
+          properties:
+            code: { const: offset_mismatch }
+            message: { type: string }
+            expected:
+              type: integer
+              minimum: 0
+              description: Where the session's log ends; the byte offset the client resends from.
+
+    Conflict:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { const: conflict }
+            message: { type: string }
+
+    Shipped:
+      type: object
+      description: |
+        What the last answer for this session said: `records_total` as `records`, and
+        `prefix_sha256`. The server's own state decides what a whole upload extends; this is
+        read only for a session that has none.
+      required: [records, prefix_sha256]
+      properties:
+        records: { type: integer, minimum: 0 }
+        prefix_sha256: { $ref: "#/components/schemas/Sha256" }
+
+    Upload:
+      type: object
+      description: |
+        Until seshi 0.16 the format was sent as `agent` and the encoding as `format`; the
+        server still takes that shape (a body with `agent`), so older uploaders keep working.
+      required: [format, session_id, transcript]
+      properties:
+        format:
+          $ref: "#/components/schemas/Format"
+          description: The format the session is filed under, as its metadata and change entries name it.
+        session_id: { type: string, minLength: 1 }
+        transcript:
+          type: string
+          description: |
+            The native log, verbatim: the whole of it (`offset` 0), or the bytes from `offset`
+            on, whole lines. Not blank.
+        encoding:
+          type: string
+          enum: [jsonl, json]
+          default: jsonl
+          description: How the log is encoded, a JSON value per line or one document (OpenCode exports, ATIF). A `json` log, and an `atif` document whatever its format, cannot be chunked.
+        offset:
+          type: integer
+          minimum: 0
+          default: 0
+          description: |
+            Where `transcript` starts in the log. 0 is the whole log; else it must equal the
+            `bytes_total` of the last answer, and the session must have a trace.
+        project:
+          type: string
+          description: The client's own label for the session (seshi's uploader sends the repository's folder name). Independent of `repo`.
+        branch:
+          type: string
+          description: The client's best guess; the branch the transcript recorded as it began wins.
+        repo:
+          type: string
+          maxLength: 1024
+          description: |
+            The repository's origin remote (the first remote when there is no `origin`),
+            normalized to lowercase without credentials or port: `github.com/acme/widget`. The session keeps
+            the first one it is sent, so a later remote change does not move it. A value with
+            user info (`@`) or a scheme is left out; the session is stored all the same, as for
+            any of these labels that is not fit to keep.
+        commit:
+          type: string
+          pattern: "^([0-9a-f]{40}|[0-9a-f]{64})$"
+          description: The commit `HEAD` named when the session's lines were written (seshi's hook records it); recorded on this upload's trace.
+        path_in_repo:
+          type: string
+          maxLength: 1024
+          description: The working folder relative to the repository's root (`packages/api`), recorded on this upload's trace; absent at the root. Never absolute, never `..`.
+        client:
+          type: string
+          maxLength: 1024
+          description: The program that sent the upload and where it ran (`seshi/0.15.0 darwin-arm64`); recorded on this upload's trace.
+        harness_version:
+          type: string
+          maxLength: 1024
+          description: "A hint, for a log that names none (Cursor's): the harness's version as the client knows it. The log's own `agent_version` wins."
+        model:
+          type: string
+          maxLength: 1024
+          description: "A hint, for a log that names none (Cursor's): the session's model as the client knows it. The log's own `model` wins."
+        labels:
+          $ref: "#/components/schemas/Labels"
+          description: |
+            The session's labels, from the uploader's config. The session keeps the first it is
+            sent; later uploads with other labels leave them, a `replace` may change them. A
+            source's own `labels` win over them. Out of the limits is `400 bad_field`.
+        parent_session_id:
+          type: string
+          description: The session this one was resumed or spawned from.
+        fork_of:
+          type: string
+          description: A fork; the parent whose history this log begins with. Only what was added past it ships, when the parent is stored here.
+        shipped: { $ref: "#/components/schemas/Shipped" }
+        replace:
+          type: boolean
+          default: false
+          description: A whole upload that does not extend the session rewrites it instead of `409 conflict`. Only the session's original writer or an admin may; with the org key, only with the session's retraction secret in `X-Seshi-Retract`.
+        rebuild:
+          type: boolean
+          default: false
+          description: Rebuild the session from this whole log and review it again even when the log only extends what is stored, where it would otherwise answer `unchanged` or write only the tail (X4.9). A replace, with the same permission (and the retraction secret with the org key). Never a chunk (`422 bad_chunk`). Without an idempotency key each rebuild gets a fresh one. The uploader sends it for the sessions `GET /v1/sessions/stale` lists. A session whose first envelopes review dropped keeps them out (F3.4).
+        visibility:
+          type: string
+          enum: [org, owner]
+          description: Who may read a new session (X5.10); the token's default, then the source's, then the server's when omitted.
+        claims:
+          type: object
+          description: |
+            Identity the data asserts (X5.5), kept from a fixed allowlist (`email`, `name`,
+            `username`, `git_email`, `git_name`, `account_ids`); anything else is dropped.
+            Never decides ownership; the credential's own (an org-key username, an IdP email)
+            win.
+        idempotency_key:
+          type: string
+          minLength: 1
+          maxLength: 2048
+          description: Identifies this upload across resends; the `Idempotency-Key` header wins.
+        retract_hash:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+          description: |
+            The sha256 (lowercase hex) of the uploading machine's retraction secret for this
+            session (F9.7). The one a session's first upload carries is kept in its metadata;
+            a later upload never sets one. That machine can later retract the session with
+            `DELETE` and `X-Seshi-Retract`.
+      example:
+        format: claude-code
+        session_id: 8f1c2d3e-…
+        transcript: "{\"type\":\"user\",…}\n{\"type\":\"assistant\",…}\n"
+        project: widget
+        branch: main
+        repo: github.com/acme/widget
+        commit: 4f2c1d0e9b8a7f6e5d4c3b2a1f0e9d8c7b6a5f4e
+        path_in_repo: packages/api
+        client: seshi/0.15.0 darwin-arm64
+
+    Whole:
+      type: object
+      description: |
+        What the client keeps after any answer: the whole session's record count and prefix
+        hash, and how much of the log the server holds (where the next chunk starts). All
+        zero when the server holds nothing of the session (`filtered`, or `dropped` before it
+        had a trace): the next upload is the whole log.
+      required: [records_total, prefix_sha256, bytes_total]
+      properties:
+        records_total: { type: integer, minimum: 0 }
+        prefix_sha256: { $ref: "#/components/schemas/Sha256" }
+        bytes_total: { type: integer, minimum: 0 }
+
+    Stored:
+      description: A trace was written (`stored`), or the content was already there (`duplicate`).
+      allOf:
+        - $ref: "#/components/schemas/Whole"
+        - type: object
+          required: [status, archive_id, content_hash, session_id, records, events]
+          properties:
+            status:
+              type: string
+              enum: [stored, duplicate]
+            archive_id: { $ref: "#/components/schemas/Sha256" }
+            content_hash: { $ref: "#/components/schemas/Sha256" }
+            session_id: { type: string }
+            records:
+              type: integer
+              description: Records this upload wrote (the tail, for a continuation).
+            events: { type: integer }
+
+    NotWritten:
+      description: |
+        No trace was written. `unchanged`: nothing new for a session that has a trace (the log
+        moved on). `filtered`: the session filter kept the session's first trace out; nothing
+        is stored. `dropped`: model review dropped it; nothing of it is stored.
+      allOf:
+        - $ref: "#/components/schemas/Whole"
+        - type: object
+          required: [status]
+          properties:
+            status:
+              type: string
+              enum: [unchanged, filtered, dropped]
+
+    IngestResult:
+      oneOf:
+        - $ref: "#/components/schemas/Stored"
+        - $ref: "#/components/schemas/NotWritten"
+
+    Identity:
+      type: object
+      required: [owner, storage, kind, role, scopes, owner_basis, credential_id]
+      properties:
+        owner: { $ref: "#/components/schemas/Owner" }
+        storage: { $ref: "#/components/schemas/StorageView" }
+        kind:
+          type: string
+          enum: [person, device, service, admin, static]
+          description: The kind of credential (X5.1).
+        role: { type: string, enum: [member, admin, service] }
+        scopes:
+          type: array
+          items: { $ref: "#/components/schemas/Scope" }
+        owner_basis: { type: string, enum: [verified, claimed, service] }
+        credential_id:
+          type: string
+          description: The token's id; never the secret.
+        visibility: { $ref: "#/components/schemas/Visibility" }
+        expires_at: { type: string, format: date-time }
+
+    RenderFormat:
+      type: string
+      enum: [seshi, letta, otlp, atif]
+      description: |
+        How a trace is returned: `seshi` (`Trace`, the stored canonical trace), `letta`
+        (`LettaTrace`, plain Letta trajectory-v1 records), `otlp` (`OtlpTrace`,
+        OTLP/HTTP JSON GenAI spans) or `atif` (`AtifDocument`, an ATIF-v1.7 document).
+
+    StorageView:
+      type: object
+      description: Where the sessions go, as a reader would need to know it. Never a secret.
+      required: [url]
+      properties:
+        url:
+          type: string
+          description: "`s3://bucket/prefix`, `r2://bucket/prefix`, `az://container/prefix`, `gs://bucket/prefix` or `file:///path`."
+        region: { type: string }
+        account_id: { type: string, description: Cloudflare account, for `r2://`. }
+        account_name: { type: string, description: Azure storage account, for `az://`. }
+        endpoint:
+          type: string
+          description: An S3-compatible endpoint when not AWS, or the Azure blob endpoint when not Azure's own.
+
+    Continuation:
+      type: object
+      description: This trace is the tail of a session already stored.
+      required: [from_record, prefix_sha256]
+      properties:
+        from_record:
+          type: integer
+          minimum: 0
+          description: Index of the trace's first record in the whole session's records.
+        prefix_sha256:
+          $ref: "#/components/schemas/Sha256"
+          description: Hash of the records before it.
+
+    SessionMetadata:
+      description: The session's `metadata.json`; the live pointer, as in `layout.md`.
+      $ref: "./schemas/metadata.schema.json"
+
+    SessionsPage:
+      type: object
+      required: [sessions, truncated]
+      properties:
+        sessions:
+          type: array
+          items: { $ref: "#/components/schemas/SessionMetadata" }
+        cursor:
+          type: string
+          description: Pass as `after` for the next page. Absent when the page is empty.
+        truncated: { type: boolean }
+
+    StaleSessionsPage:
+      type: object
+      required: [sessions, truncated]
+      properties:
+        sessions:
+          type: array
+          items:
+            type: object
+            required: [format, session_id, current]
+            additionalProperties: false
+            properties:
+              format: { type: string, description: The format the session is filed under. }
+              session_id: { type: string }
+              built_with:
+                type: string
+                description: The format version that built it; absent when none was recorded.
+              current: { type: string, description: The format's current normalizer version. }
+        cursor:
+          type: string
+          description: Pass as `after` for the next page. Absent when nothing was looked at.
+        truncated: { type: boolean }
+
+    ToolCall:
+      type: object
+      required: [id, name, args]
+      properties:
+        id: { type: string, minLength: 1 }
+        name: { type: string, minLength: 1 }
+        args: { type: string, description: The arguments, as a JSON string. }
+
+    Record:
+      description: |
+        One Letta trajectory-v1 record, as `@letta-ai/trajectory` defines them. The first
+        record of a trace is `meta`; the rest carry a `timestamp`.
+      oneOf:
+        - type: object
+          title: meta
+          required: [role, source]
+          properties:
+            role: { const: meta }
+            source: { type: string, minLength: 1 }
+            cwd: { type: string }
+            git_branch: { type: string }
+            model: { type: string }
+            agent_version: { type: string }
+        - type: object
+          title: text
+          required: [role, content, timestamp]
+          properties:
+            role: { type: string, enum: [user, system, observation, reasoning] }
+            content: { type: string }
+            timestamp: { type: string }
+        - type: object
+          title: assistant
+          required: [role, timestamp]
+          properties:
+            role: { const: assistant }
+            content: { type: [string, "null"] }
+            tool_calls:
+              type: array
+              items: { $ref: "#/components/schemas/ToolCall" }
+            timestamp: { type: string }
+        - type: object
+          title: tool
+          required: [role, tool_call_id, content, timestamp]
+          properties:
+            role: { const: tool }
+            tool_call_id: { type: string, minLength: 1 }
+            content: { type: string }
+            timestamp: { type: string }
+            ok: { type: boolean }
+
+    TraceEvent:
+      type: object
+      description: |
+        One unit of a trace. `index` is stable for the object's lifetime; anything that
+        addresses a span of a session does so by index range.
+      required: [index, role, text, timestamp]
+      properties:
+        index: { type: integer, minimum: 0 }
+        role:
+          type: string
+          enum: [user, assistant, tool_call, tool_result, system, observation, reasoning]
+        text: { type: string }
+        timestamp: { type: [string, "null"] }
+        tool_name: { type: string }
+        tool_call_id: { type: string }
+        ok: { type: boolean }
+
+    Trace:
+      description: "`trace.<content_hash>.json.gz`, decoded: the stored canonical trace, immutable and content-addressed, as in `layout.md`."
+      $ref: "./schemas/trace.schema.json"
+
+    LettaTrace:
+      type: object
+      description: "A trace rendered as Letta trajectory-v1 (`?format=letta`): plain trajectory-v1 records without `llm_calls` or `provenance`, with the same events and hash as the canonical trace."
+      required: [schema, content_hash, source, agent, session_id, started_at, ended_at, records, events, metadata]
+      properties:
+        schema: { const: sessionstorage/trace/1 }
+        content_hash: { $ref: "#/components/schemas/Sha256" }
+        source: { type: string, description: What normalized it (the meta record's `source`). }
+        agent: { type: string, description: What the client posted it as. }
+        project: { type: string }
+        branch: { type: string }
+        session_id: { type: [string, "null"] }
+        started_at: { type: [string, "null"] }
+        ended_at: { type: [string, "null"] }
+        records:
+          type: array
+          items: { $ref: "#/components/schemas/Record" }
+        events:
+          type: array
+          items: { $ref: "#/components/schemas/TraceEvent" }
+        metadata:
+          type: object
+          properties:
+            cwd: { type: string }
+            git_branch: { type: string }
+            model: { type: string }
+            agent_version: { type: string }
+            commit: { type: string }
+            path_in_repo: { type: string }
+            client: { type: string }
+            parent_session_id: { type: string }
+            continuation: { $ref: "#/components/schemas/Continuation" }
+            labels: { $ref: "#/components/schemas/Labels" }
+            normalizer:
+              type: object
+              required: [name, version]
+              properties:
+                name: { type: string, description: What produced `records`; the SDK. }
+                version: { type: string, description: Its release, with the `@letta-ai/trajectory` it ran as build metadata. }
+                format_version: { type: string, description: "The format adapter's own normalizer version (X4.9): what makes a session stale." }
+          additionalProperties: true
+
+    AtifDocument:
+      type: object
+      description: A trace rendered as an ATIF-v1.7 document (`?format=atif`), token usage as step metrics.
+      required: [schema_version, agent, steps]
+      properties:
+        schema_version: { const: ATIF-v1.7 }
+        session_id: { type: string }
+        agent:
+          type: object
+          required: [name, version]
+          properties:
+            name: { type: string }
+            version: { type: string }
+            model_name: { type: string }
+        steps:
+          type: array
+          items:
+            type: object
+            required: [step_id, source, message]
+            properties:
+              step_id: { type: integer, minimum: 1 }
+              source: { type: string, enum: [system, user, agent] }
+              message: { type: string }
+        final_metrics: { type: object }
+        extra: { type: object }
+
+    OtlpTrace:
+      type: object
+      description: |
+        A trace rendered as OTLP (`?format=otlp`): an OTLP/HTTP JSON `ExportTraceServiceRequest`
+        of the trace as GenAI spans, as in `layout.md`. It can be posted as-is to a collector's
+        `/v1/traces`.
+      required: [resourceSpans]
+      properties:
+        resourceSpans:
+          type: array
+          items:
+            type: object
+            required: [resource, scopeSpans]
+            properties:
+              resource:
+                type: object
+                required: [attributes]
+                properties:
+                  attributes: { type: array, items: { $ref: "#/components/schemas/OtlpKeyValue" } }
+              scopeSpans:
+                type: array
+                items:
+                  type: object
+                  required: [scope, spans]
+                  properties:
+                    scope:
+                      type: object
+                      required: [name, version]
+                      properties:
+                        name: { type: string }
+                        version: { type: string }
+                    spans: { type: array, items: { $ref: "#/components/schemas/OtlpSpan" } }
+
+    OtlpKeyValue:
+      type: object
+      required: [key, value]
+      properties:
+        key: { type: string }
+        value:
+          type: object
+          minProperties: 1
+          maxProperties: 1
+          properties:
+            stringValue: { type: string }
+            boolValue: { type: boolean }
+            intValue: { type: string, pattern: "^-?[0-9]+$" }
+            doubleValue: { type: number }
+          additionalProperties: false
+
+    OtlpSpan:
+      type: object
+      required: [traceId, spanId, name, kind, startTimeUnixNano, endTimeUnixNano, attributes, status]
+      properties:
+        traceId: { type: string, pattern: "^[0-9a-f]{32}$" }
+        spanId: { type: string, pattern: "^[0-9a-f]{16}$" }
+        parentSpanId: { type: string, pattern: "^[0-9a-f]{16}$" }
+        name: { type: string }
+        kind: { type: integer, description: "`1` internal, `3` client." }
+        startTimeUnixNano: { type: string, pattern: "^[0-9]+$" }
+        endTimeUnixNano: { type: string, pattern: "^[0-9]+$" }
+        attributes: { type: array, items: { $ref: "#/components/schemas/OtlpKeyValue" } }
+        status:
+          type: object
+          required: [code]
+          properties:
+            code: { type: integer, enum: [0, 1, 2] }
+            message: { type: string }
+
+    ChangeEntry:
+      description: One `changes/<stamp>-<archive_id>-<suffix>-<hash|tombstone|visibility>.json`, as in `layout.md`.
+      $ref: "./schemas/change.schema.json"
+
+    ChangesPage:
+      type: object
+      required: [entries, truncated]
+      properties:
+        entries:
+          type: array
+          items:
+            type: object
+            required: [key, entry]
+            properties:
+              key:
+                type: string
+                description: The object key; the cursor for everything up to and including it.
+              entry: { $ref: "#/components/schemas/ChangeEntry" }
+        cursor:
+          type: string
+          description: The last key on the page; pass as `after`. Absent when the page is empty.
+        truncated: { type: boolean }
+
+    AllChangesPage:
+      type: object
+      required: [entries, truncated, through]
+      properties:
+        entries:
+          type: array
+          items:
+            type: object
+            required: [owner, key, entry]
+            properties:
+              owner:
+                type: string
+                description: The owner whose feed the entry is in (a person, `svc:<source-id>` or `h-…`).
+              key:
+                type: string
+                description: The entry's object key, `owners/<owner>/changes/…`; dedupe by it.
+              entry: { $ref: "#/components/schemas/ChangeEntry" }
+        cursor:
+          type: string
+          description: Opaque; pass as `after`. Absent when the page is empty.
+        truncated:
+          type: boolean
+          description: More entries up to `through` follow this page.
+        through:
+          type: string
+          format: date-time
+          description: |
+            Every owner's feed had been read up to this time; entries stamped later wait until
+            it moves past them.
+
+    CaptureRules:
+      description: |
+        `seshi/capture-rules/1`: the org's capture rules, as `GET /v1/capture/rules` serves them.
+      type: object
+      required: [schema, exclude]
+      properties:
+        schema: { const: "seshi/capture-rules/1" }
+        exclude:
+          type: array
+          description: |
+            The org's exclude list, as `capture.exclude` reads it: a repository (`owner/name` on
+            any host, `host/owner/name` on one, or a remote URL), or a folder (starting with `/`,
+            `~`, a drive or `\\server`; a laptop's own paths, never matched by the server). `*`
+            matches within a path segment, `**` across any number.
+          items: { type: string }
+        redact_tool_calls:
+          type: array
+          description: |
+            The org's tool-call redaction list, written and matched as `exclude` is, which wins
+            for a place on both. Absent from a server older than the list.
+          items: { type: string }
+
+    RedactionRules:
+      description: |
+        `seshi/redaction-rules/1`: the operator's rule packs, as `GET /v1/redaction/rules`
+        serves them. Each pack is what the server's one pack validator produced; a client
+        validates it again before use.
+      type: object
+      required: [schema, rule_set, builtin, packs]
+      properties:
+        schema: { const: "seshi/redaction-rules/1" }
+        rule_set:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+          description: The server's rule-set hash, as `metadata.redaction.rule_set` records it.
+        builtin:
+          type: string
+          description: The server's built-in pack version (`seshi/rules/3`).
+        packs:
+          type: array
+          items: { $ref: "#/components/schemas/RulePack" }
+
+    RulePack:
+      description: One rule pack (F2.1), defaults filled in. Operator patterns are RE2 syntax.
+      type: object
+      required: [id, disable, rules, sensitive_files, secret_commands]
+      additionalProperties: false
+      properties:
+        id: { $ref: "#/components/schemas/RuleId" }
+        version: { type: string }
+        description: { type: string }
+        disable:
+          type: array
+          description: Built-in rule ids this pack turns off.
+          items: { $ref: "#/components/schemas/RuleId" }
+        rules:
+          type: array
+          items:
+            type: object
+            required: [id, patterns, applies_to]
+            additionalProperties: false
+            properties:
+              id: { $ref: "#/components/schemas/RuleId" }
+              description: { type: string }
+              patterns: { type: array, items: { type: string, minLength: 1 } }
+              replacement:
+                type: string
+                description: What a match becomes; `[redacted:<id>]` when absent.
+              applies_to:
+                type: array
+                items: { enum: [text, tool_input, tool_output] }
+              tests: { $ref: "#/components/schemas/RuleTests" }
+        sensitive_files:
+          type: array
+          items:
+            type: object
+            required: [id, globs]
+            additionalProperties: false
+            properties:
+              id: { $ref: "#/components/schemas/RuleId" }
+              description: { type: string }
+              globs: { type: array, items: { type: string, minLength: 1 } }
+              tests: { $ref: "#/components/schemas/RuleTests" }
+        secret_commands:
+          type: array
+          items:
+            type: object
+            required: [id, patterns]
+            additionalProperties: false
+            properties:
+              id: { $ref: "#/components/schemas/RuleId" }
+              description: { type: string }
+              patterns: { type: array, items: { type: string, minLength: 1 } }
+              tests: { $ref: "#/components/schemas/RuleTests" }
+
+    RuleId:
+      type: string
+      pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+      maxLength: 64
+      description: A rule or pack id; redaction counts are by rule id (F2.3).
+
+    RuleTests:
+      type: object
+      required: [match, no_match]
+      additionalProperties: false
+      properties:
+        match: { type: array, items: { type: string } }
+        no_match: { type: array, items: { type: string } }
+
+    ReviewFinding:
+      type: object
+      description: Where the redactor found text to remove, and what kind; never the text (F3.8).
+      required: [record, field, category, action]
+      properties:
+        record:
+          type: integer
+          minimum: 0
+          description: The record's index in the trace the write produced.
+        field: { type: string, description: "`content`, or `tool_calls[N].args`." }
+        category: { type: string }
+        action: { type: string, enum: [redact, withhold] }
+
+    ReviewDecision:
+      type: object
+      description: |
+        One stored write's review (`seshi/review/1`). Callers who are not admins get `schema`,
+        `n`, `at`, `content_hash` and `decision` only.
+      required: [schema, n, at, content_hash, decision]
+      properties:
+        schema: { const: seshi/review/1 }
+        n: { type: integer, minimum: 0 }
+        at: { type: string, format: date-time }
+        content_hash: { type: string, pattern: "^[0-9a-f]{64}$" }
+        decision: { type: string, enum: [allow, redact, skipped] }
+        policy: { type: string }
+        policy_hash: { type: string }
+        decision_model: { type: string, description: "`<provider>/<model>`." }
+        redactor_model: { type: string }
+        findings:
+          type: array
+          items: { $ref: "#/components/schemas/ReviewFinding" }
+        unmatched:
+          type: integer
+          minimum: 0
+          description: Findings that named no text the redactor was given, so removed nothing.
+        parts:
+          type: integer
+          minimum: 0
+          description: How many parts the write was split into for the models (F3.7).
+        failure:
+          type: object
+          description: Why review was skipped (`on_failure = "skip"`, F3.4).
+          required: [step, code, attempts]
+          properties:
+            step: { type: string, enum: [decision, redactor] }
+            code: { type: string }
+            attempts: { type: integer, minimum: 1 }
+
+    ReviewsPage:
+      type: object
+      required: [reviews]
+      properties:
+        reviews:
+          type: array
+          items: { $ref: "#/components/schemas/ReviewDecision" }
+
+    OtlpExportResponse:
+      description: An `ExportTraceServiceResponse` in OTLP's JSON mapping (F4.1).
+      type: object
+      properties:
+        partialSuccess:
+          type: object
+          properties:
+            rejectedSpans:
+              description: How many spans were not accepted (an int64, written as a string).
+              type: string
+              pattern: "^[0-9]+$"
+            errorMessage: { type: string }
+
+    OtlpStatus:
+      description: A `google.rpc.Status`, what OTLP/HTTP answers a failed request with.
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: integer, description: "A google.rpc.Code (3 invalid argument, 7 permission denied, 14 unavailable, 16 unauthenticated)." }
+        message: { type: string }
+
+    SearchResults:
+      type: object
+      required: [query, total, results, index]
+      properties:
+        query: { type: string }
+        total:
+          type: integer
+          minimum: 0
+          description: |
+            Sessions that match, as the index holds them. A page can hold fewer than it
+            promises: a session deleted or made private since it was indexed is left out.
+        capped:
+          type: boolean
+          enum: [true]
+          description: |
+            The index stopped counting at its cap (the LanceDB backend's
+            `search.lance.max_scored_rows`): at least `total` sessions match. Absent when
+            `total` is exact.
+        results:
+          type: array
+          items: { $ref: "#/components/schemas/SearchResult" }
+        cursor:
+          type: string
+          description: Pass as `cursor` for the next page; absent on the last.
+        index:
+          type: object
+          required: [ready_at, sessions]
+          properties:
+            ready_at:
+              type: string
+              format: date-time
+              description: When this instance's index first caught up with the change feed.
+            caught_up_at:
+              type: string
+              format: date-time
+              description: When it last finished reading the change feed.
+            sessions: { type: integer, minimum: 0 }
+
+    SessionSummary:
+      type: object
+      description: A session as the search index holds it.
+      required: [owner, format, session_id, archive_id, visibility, updated_at]
+      properties:
+        owner: { $ref: "#/components/schemas/Owner" }
+        format: { type: string, description: The format the session is filed under. }
+        session_id: { type: string }
+        archive_id: { type: string, pattern: "^[0-9a-f]{64}$" }
+        origin_agent: { type: string }
+        native_session_id: { type: string }
+        project: { type: string }
+        branch: { type: string }
+        repo: { type: string, description: "The repository's normalized remote (`github.com/acme/widget`)." }
+        harness: { type: string, description: "What ran the session: its meta record's `source`." }
+        agent_version: { type: string, description: "The session's `agent_version`: the version of its harness it started on (for Cursor, the version at its latest upload)." }
+        models:
+          type: array
+          items: { type: string }
+          description: Every model the session used.
+        labels: { $ref: "#/components/schemas/Labels" }
+        source_id: { type: string }
+        visibility: { type: string, enum: [org, owner] }
+        started_at: { type: string, format: date-time }
+        ended_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    SearchResult:
+      description: A session with records that match.
+      allOf:
+        - { $ref: "#/components/schemas/SessionSummary" }
+        - type: object
+          required: [score, hits, matches]
+          properties:
+            score:
+              type: number
+              description: How well it matched; higher is better, comparable within one answer only.
+            hits:
+              type: integer
+              minimum: 1
+              description: How many of its records matched.
+            matches:
+              type: array
+              items: { $ref: "#/components/schemas/SearchMatch" }
+
+    SessionList:
+      type: object
+      required: [sessions, window, index]
+      properties:
+        sessions:
+          type: array
+          items: { $ref: "#/components/schemas/SessionSummary" }
+        window:
+          type: object
+          description: The window the sessions overlap, as the server read it.
+          required: [since]
+          properties:
+            since: { type: string, format: date-time }
+            until: { type: string, format: date-time }
+        cursor:
+          type: string
+          description: Pass as `after` for the next page; absent on the last.
+        index:
+          type: object
+          required: [ready_at, sessions]
+          properties:
+            ready_at: { type: string, format: date-time }
+            caught_up_at: { type: string, format: date-time }
+            sessions: { type: integer, minimum: 0 }
+
+    SessionEvents:
+      type: object
+      required: [session, mode, from, to, events]
+      properties:
+        session: { $ref: "#/components/schemas/SessionHeader" }
+        mode: { type: string, enum: [condensed, full] }
+        from: { type: integer, minimum: 0, description: "The range read, `[from, to)`." }
+        to: { type: integer, minimum: 0 }
+        events:
+          type: array
+          items: { $ref: "#/components/schemas/SessionEvent" }
+        next:
+          type: integer
+          minimum: 0
+          description: The `seq` to read on from; absent at the session's end.
+        next_offset:
+          type: integer
+          minimum: 0
+          description: For a read of one event in pieces, the `offset` to read on from; absent at its end.
+
+    SessionEvent:
+      type: object
+      required: [seq, role, content_hash, event_index, text, chars]
+      properties:
+        seq: { type: integer, minimum: 0, description: Its place in the session's current trace chain. }
+        role:
+          type: string
+          enum: [user, assistant, tool_call, tool_result, system, observation, reasoning]
+        content_hash: { type: string, pattern: "^[0-9a-f]{64}$", description: The trace it is in. }
+        event_index: { type: integer, minimum: 0, description: Its index in that trace's events. }
+        timestamp: { type: string, format: date-time }
+        tool_name: { type: string }
+        tool_call_id: { type: string }
+        ok: { type: boolean, description: Tool results that record whether the call succeeded. }
+        text: { type: string }
+        chars: { type: integer, minimum: 0, description: "The text's full length, in UTF-16 code units." }
+        offset: { type: integer, minimum: 0, description: "Where `text` starts: only on a read of one event in pieces." }
+        cut: { type: integer, minimum: 1, description: Characters after `text` left out. }
+
+    SessionHeader:
+      type: object
+      required:
+        [owner, archive_id, format, session_id, visibility, updated_at, head, traces, events, models, llm_calls, tokens]
+      properties:
+        owner: { $ref: "#/components/schemas/Owner" }
+        archive_id: { type: string, pattern: "^[0-9a-f]{64}$" }
+        format: { type: string }
+        session_id: { type: string }
+        origin_agent: { type: string }
+        harness: { type: string }
+        project: { type: string }
+        repo: { type: string }
+        branch: { type: string }
+        labels: { $ref: "#/components/schemas/Labels" }
+        visibility: { type: string, enum: [org, owner] }
+        started_at: { type: string, format: date-time }
+        ended_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        head: { type: string, pattern: "^[0-9a-f]{64}$" }
+        traces: { type: integer, minimum: 1, description: Traces in the current chain. }
+        events: { type: integer, minimum: 0, description: Events across them. }
+        models: { type: array, items: { type: string } }
+        llm_calls: { type: integer, minimum: 0 }
+        tokens:
+          type: object
+          description: Token counts summed over the chain's model calls.
+          required:
+            [input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, reasoning_tokens, total_tokens]
+          properties:
+            input_tokens: { type: integer, minimum: 0 }
+            output_tokens: { type: integer, minimum: 0 }
+            cache_read_input_tokens: { type: integer, minimum: 0 }
+            cache_creation_input_tokens: { type: integer, minimum: 0 }
+            reasoning_tokens: { type: integer, minimum: 0 }
+            total_tokens: { type: integer, minimum: 0 }
+
+    SearchMatch:
+      type: object
+      description: |
+        One matching record: the trace and event it is in, and a snippet. For what the assistant
+        said alongside tool calls (which the trace's events leave out), `event_index` is the
+        record's first `tool_call` event.
+      required: [content_hash, event_index, seq, role, snippet, highlights]
+      properties:
+        content_hash: { type: string, pattern: "^[0-9a-f]{64}$" }
+        event_index: { type: integer, minimum: 0 }
+        seq:
+          type: integer
+          minimum: 0
+          description: |
+            The record's place in the session, from 0 across its traces: the `seq` that reads
+            around it in the session's events.
+        role:
+          type: string
+          enum: [user, assistant, tool_call, tool_result, system, observation, reasoning]
+        tool_name: { type: string }
+        timestamp: { type: string, format: date-time }
+        snippet:
+          type: string
+          description: Up to a few dozen words around the match; `…` marks text left out.
+        highlights:
+          type: array
+          description: "The matched words in `snippet`: `[start, end)` offsets in UTF-16 code units."
+          items:
+            type: array
+            items: { type: integer, minimum: 0 }
+            minItems: 2
+            maxItems: 2
+
+    SourceStatus:
+      type: object
+      required: [id, type, enabled, polled, checkpoint, dropped, failed, health]
+      properties:
+        id: { type: string }
+        type:
+          type: string
+          description: The source's `type` (`otlp`, `datadog`, `s3`), or `upload`.
+        enabled: { type: boolean }
+        polled:
+          type: boolean
+          description: The worker polls it (enabled, with a connector in this binary).
+        connector: { type: string }
+        interval_ms: { type: integer }
+        note:
+          type: string
+          description: Why it is not polled, when it is not.
+        checkpoint:
+          oneOf:
+            - type: "null"
+            - type: object
+              required: [updated_at, cursor]
+              properties:
+                updated_at: { type: string, format: date-time }
+                cursor: { type: object }
+        dropped: { type: integer, minimum: 0 }
+        failed: { type: integer, minimum: 0 }
+        health:
+          type: object
+          description: Outcome counts over the days asked for (X4.8).
+          additionalProperties: { type: integer }
+
+    SourceDetail:
+      type: object
+      description: "`GET /v1/admin/sources/{id}`: a source's status, and where it is set."
+      required: [id, type, enabled, polled, checkpoint, dropped, failed, health, managed]
+      properties:
+        managed:
+          type: string
+          enum: [file, store, builtin]
+          description: Set in the server's files, stored in the bucket, or built in (`upload`).
+        config:
+          type: object
+          additionalProperties: true
+          description: A stored source's settings, each sealed secret as a `SecretView`.
+        etag: { type: string }
+        updated_at: { type: string, format: date-time }
+        running:
+          type: boolean
+          description: A stored source this instance runs.
+        id: { type: string }
+        type:
+          type: string
+          description: The source's `type` (`otlp`, `datadog`, `s3`), or `upload`.
+        enabled: { type: boolean }
+        polled:
+          type: boolean
+          description: The worker polls it (enabled, with a connector in this binary).
+        connector: { type: string }
+        interval_ms: { type: integer }
+        note:
+          type: string
+          description: Why it is not polled, when it is not.
+        checkpoint:
+          oneOf:
+            - type: "null"
+            - type: object
+              required: [updated_at, cursor]
+              properties:
+                updated_at: { type: string, format: date-time }
+                cursor: { type: object }
+        dropped: { type: integer, minimum: 0 }
+        failed: { type: integer, minimum: 0 }
+        health:
+          type: object
+          description: Outcome counts over the days asked for (X4.8).
+          additionalProperties: { type: integer }
+
+    SourceRecord:
+      type: object
+      description: |
+        A drop (`seshi/dropped/1`) or failure (`seshi/failed/1`) record: that an envelope
+        arrived and why it was not stored, never what it contained.
+      required: [schema, at, source, idempotency_key]
+      properties:
+        schema: { enum: [seshi/dropped/1, seshi/failed/1] }
+        at: { type: string, format: date-time }
+        source: { type: string }
+        source_kind: { type: string }
+        owner: { type: string }
+        session_key: { type: string }
+        idempotency_key: { type: string }
+        provenance: { type: object }
+        code:
+          type: string
+          description: A failure's pipeline error code.
+        message:
+          type: string
+          description: A failure's message, with quoted data elided.
+        reason: { enum: [review_drop, review_failed] }
+        policy: { type: string }
+        policy_hash: { type: string }
+        decision_model: { type: string }
+
+    RecordsPage:
+      type: object
+      required: [source, kind, records, truncated]
+      properties:
+        source: { type: string }
+        kind: { enum: [failed, dropped] }
+        records:
+          type: array
+          items:
+            type: object
+            required: [key, record]
+            properties:
+              key: { type: string }
+              record: { $ref: "#/components/schemas/SourceRecord" }
+        cursor:
+          type: string
+          description: The last key on the page; pass as `after`.
+        truncated: { type: boolean }

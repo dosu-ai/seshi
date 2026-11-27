@@ -2,7 +2,8 @@
  * full-text query as a plain tree (turned into LanceDB's classes by `lance.ts`), and the check
  * prefix queries need. Kept apart so the escaping can be tested on its own, with hostile
  * values. */
-import type { BackendQuery } from "@seshi/search";
+import type { Labels } from "@seshi/model";
+import type { BackendQuery, SessionListQuery } from "@seshi/search";
 import { type MatchItem, type MatchTree, SearchQueryError, WORD } from "@seshi/search";
 
 /** A prefix must have at least this many letters (`de*`, not `d*`). */
@@ -43,11 +44,12 @@ export function sqlTime(ms: number): string {
   return `to_timestamp_millis(${ms})`;
 }
 
-/** The `where` for a query on `events`, or null when nothing can match (no owners, or an
- * own-only viewer who owns nothing). */
-export function filterSql(
-  q: Omit<BackendQuery, "match" | "sort" | "limit" | "offset" | "matches">,
-): string | null {
+type SessionFilters = Omit<SessionListQuery, "limit" | "after" | "since" | "until">;
+
+/** The clauses `events` and `sessions` share: who may see the session, and its fields. Null
+ * when nothing can match (no owners, or an own-only viewer who owns nothing). `labels` is how the
+ * table holds them. */
+function sharedFilters(q: SessionFilters, labels: (labels: Labels) => string): string[] | null {
   const where: string[] = [];
   const { viewer } = q;
   if (viewer.ownOnly) {
@@ -79,9 +81,21 @@ export function filterSql(
   if (q.harness !== undefined) where.push(`harness = ${sqlString(q.harness)}`);
   if (q.agent_version !== undefined) where.push(`agent_version = ${sqlString(q.agent_version)}`);
   if (q.model !== undefined) where.push(`array_has_any(models, [${sqlString(q.model)}])`);
-  const labels = Object.entries(q.labels ?? {}).map(([k, v]) => `${k}=${v}`);
-  if (labels.length > 0) where.push(`array_has_all(labels, [${sqlList(labels)}])`);
+  if (q.labels !== undefined && Object.keys(q.labels).length > 0) where.push(labels(q.labels));
   if (q.source !== undefined) where.push(`source_id = ${sqlString(q.source)}`);
+  return where;
+}
+
+/** The `where` for a query on `events`, or null when nothing can match. */
+export function filterSql(
+  q: Omit<BackendQuery, "match" | "sort" | "limit" | "offset" | "matches">,
+): string | null {
+  const where = sharedFilters(
+    q,
+    (labels) =>
+      `array_has_all(labels, [${sqlList(Object.entries(labels).map(([k, v]) => `${k}=${v}`))}])`,
+  );
+  if (where === null) return null;
   if (q.roles !== undefined) {
     if (q.roles.length === 0) return null;
     where.push(`role IN (${sqlList(q.roles)})`);
@@ -89,6 +103,43 @@ export function filterSql(
   if (q.since !== undefined) where.push(`coalesce(ts, session_updated) >= ${sqlTime(q.since)}`);
   if (q.until !== undefined) where.push(`coalesce(ts, session_updated) <= ${sqlTime(q.until)}`);
   return where.join(" AND ");
+}
+
+/** The `where` for a listing of `sessions`, or null when nothing can match. `sessions` holds
+ * labels as their JSON object: each label is found as its `"key":"value"` text, which a JSON
+ * object holds only as that key with that value (a quote inside a key or value is escaped). */
+export function sessionsSql(q: SessionListQuery): string | null {
+  const where = sharedFilters(q, (labels) =>
+    Object.entries(labels)
+      .map(
+        ([k, v]) =>
+          `labels LIKE ${sqlString(`%${likeLiteral(`${JSON.stringify(k)}:${JSON.stringify(v)}`)}%`)} ESCAPE '\\'`,
+      )
+      .join(" AND "),
+  );
+  if (where === null) return null;
+  where.unshift("removed = false");
+  if (q.since !== undefined) {
+    where.push(
+      `(ended_at >= ${sqlTime(q.since)} OR (ended_at IS NULL AND updated_ms >= ${sqlInt(q.since)}))`,
+    );
+  }
+  if (q.until !== undefined) {
+    where.push(
+      `(started_at <= ${sqlTime(q.until)} OR (started_at IS NULL AND updated_ms <= ${sqlInt(q.until)}))`,
+    );
+  }
+  if (q.after !== undefined) {
+    const at = sqlInt(q.after.updated);
+    where.push(`(updated_ms < ${at} OR (updated_ms = ${at} AND id < ${sqlString(q.after.key)}))`);
+  }
+  return where.join(" AND ");
+}
+
+/** A whole number for a filter; anything else is refused. */
+export function sqlInt(n: number): string {
+  if (!Number.isSafeInteger(n)) throw new SearchQueryError("a filter value is not a whole number");
+  return String(n);
 }
 
 /** A full-text query, as LanceDB's classes take it. */
