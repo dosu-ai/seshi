@@ -116,7 +116,9 @@ describe("the hostile-statement suite on SQLite", () => {
         } catch {
           prepared = false;
         }
-        expect(prepared || c.expect === "error", `${c.id} does not prepare`).toBe(true);
+        // A `no_leak` case may go either way: some depend on the SQLite build (lexing-15).
+        const either = c.expect === "error" || c.expect === "no_leak";
+        expect(prepared || either, `${c.id} does not prepare`).toBe(true);
         if (c.expect === "error") expect(prepared, `${c.id} prepares`).toBe(false);
       }
     } finally {

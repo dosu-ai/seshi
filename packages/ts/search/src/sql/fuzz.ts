@@ -676,7 +676,8 @@ export const FUZZ_KNOWN: readonly KnownFinding[] = [
   // The check's parser takes what SQLite cannot parse: refused by SQLite, the safe way round.
   { kind: "parse", engine: "sqlite", sql: gapped("\\bGROUP", "BY", "ALL\\b"), pinned: "errors-6" },
   { kind: "parse", engine: "sqlite", sql: /\w\([^()]*\)\.\w/, pinned: "errors-9" },
-  // A comment where SQLite looks ahead to tell WINDOW, OVER and FILTER from identifiers.
+  // A comment where some SQLite builds (macOS's system one) look ahead to tell WINDOW, OVER and
+  // FILTER from identifiers.
   {
     kind: "parse",
     engine: "sqlite",

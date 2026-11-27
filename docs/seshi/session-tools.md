@@ -699,8 +699,9 @@ job's `sql-fuzz-report` artifact. What it found is written down in the corpus, e
   message says nothing, but the failure is the leak. Members are refused on SQLite (T11), and
   this is one more reason they stay so.
 - **The check accepts some statements SQLite cannot parse** (`errors-6`, `errors-9`,
-  `lexing-15`–`17`): `GROUP BY ALL`, a call's field (`json_each('[1]').models`), and a comment
-  just after `WINDOW name`, `OVER` or `FILTER`, where SQLite looks one token ahead, past
+  `lexing-15`–`17`): `GROUP BY ALL`, a call's field (`json_each('[1]').models`), and, on some
+  SQLite builds (macOS's system SQLite 3.51.0, which Bun uses there; not Bun's own on Linux), a
+  comment just after `WINDOW name`, `OVER` or `FILTER`, where SQLite looks one token ahead, past
   whitespace but not past a comment, to tell the keyword from an identifier. Each fails to
   prepare, the safe way round, and the `EXPLAIN` check stands behind it.
 
