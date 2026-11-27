@@ -17,6 +17,10 @@ export interface SqlLimits {
 }
 
 /** A statement over a SQLite index: the file, opened read-only. */
+/** Set to `duckdb` in the environment of a pool that serves a LanceDB index: its workers warm
+ * DuckDB before they say they are ready. Workers of a SQLite index never load it. */
+export const SQL_ENGINE_ENV = "SESHI_SQL_ENGINE";
+
 export interface SqliteRequest {
   id: string;
   engine: "sqlite";

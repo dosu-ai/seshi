@@ -34,6 +34,7 @@
     "dev": "bun --watch run src/main.ts serve"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
     "@seshi/api": "workspace:*",
     "@seshi/auth": "workspace:*",
     "@seshi/capture": "workspace:*",

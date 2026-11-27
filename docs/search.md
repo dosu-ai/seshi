@@ -74,6 +74,49 @@ turned off; 5 when not signed in or not allowed (`--owner` naming someone else, 
 lacks the `search` scope); 7
 when the server or bucket cannot answer, or the server's index is still being built.
 
+## Listing and reading sessions
+
+Search needs words. Two more reads answer "what did I work on yesterday in this repo" and
+"what happened around that failure" (the session tools, [agents.md](agents.md), which
+`seshi mcp` gives coding agents):
+
+```sh
+seshi sessions recent --repo widget --since 24h
+seshi sessions recent --owner alice@acme.com --label team=core --json
+seshi sessions read claude-code/4b1a… --around 212 --context 3
+seshi sessions read alice@acme.com/9f3c…e1 --from 200 --full
+```
+
+`seshi sessions recent` (`GET /v1/search/sessions`) lists the sessions you may read that
+overlap a window, newest first by when they were last written, from the index's sessions:
+the last 7 days unless `--since` and `--until` say otherwise (a date, an RFC 3339 time or an
+age). A session overlaps the window when it started before its end and ended after its start
+(its first and last events, or its last update when its events carry no time). It takes
+`--owner`, `--agent`, `--repo`, `--branch`, `--harness`, `--model`, `--label` and `--source` as
+`seshi search` does, `--limit` (20, at most 100) and `--after <cursor>` for the next page. Who
+sees what is as for search, and each session is checked against its current metadata before it
+is listed.
+
+`seshi sessions read <session>` (`GET …/events`) reads a session's events from its stored
+traces, not the index, so tool output comes whole. The session is `<format> <session-id>`,
+`format/session-id`, or `owner/archive-id` as listings and search results name it. Events are
+numbered by `seq`, their place in the session counting from 0 across its traces (a session
+uploaded in chunks has a trace per chunk); a replace numbers them again, which `--head <h>`
+(the `head` an earlier read gave) refuses with exit 6.
+
+| Flag | |
+|---|---|
+| `--from N`, `--to N` | The range `[from, to)` (the whole session by default) |
+| `--around N [--context N]` | `context` events (5, at most 50) either side of one |
+| `--hash <trace>` | Count positions from the start of this trace (its content hash, or 8 or more of its characters): a search match's trace and `event_index` (`--hash 1a2b3c4d --around 13`) |
+| `--full` | Tool results as stored; without it each is cut to its first 200 characters, with how much was left out |
+| `--roles user,assistant,…` | Only events of these roles |
+| `--max-chars N` | Characters of text to give at most (1,000 to 30,000, the default). The read stops at an event boundary and says `next: <seq>`, or cuts an event that does not fit |
+| `--event N [--offset N]` | One event's text in pieces, from `offset` |
+
+`--json` prints the API's `SessionList` and `SessionEvents`. In serverless mode both read the
+bucket and this machine's index, as `seshi search` does.
+
 ## SQL
 
 ```sh
@@ -87,7 +130,7 @@ over three views of the search index: `sessions` (one row per session), `events`
 records, with `seq`, `role`, `tool_name`, `tool_call_id`, `ok`, `chars` and `text`) and
 `llm_calls` (every model request, with its tokens). `seshi sql --schema` and `GET
 /v1/sql/schema` give their columns, with types and comments, the dialect and three examples.
-Use `search` to find words and `seshi sessions show` to read a session; `sql` is for counting,
+Use `search` to find words and `seshi sessions read` to read a session; `sql` is for counting,
 grouping and joining.
 
 On a SQLite index the statement runs in SQLite itself, so it is written in SQLite's dialect:
@@ -247,7 +290,9 @@ service_account_key = { file = "/secrets/seshi-sql-ro.json" }   # gs://
 
 Only the workers' environment holds it, and only as the index's storage options: the server's
 own keys never reach them. Without `[search.sql.storage]` the workers read with the index's own
-credential, which can write, and the server warns at start-up.
+credential, which can write, and the server warns at start-up; where that credential is the
+machine's (Application Default Credentials, an instance role), the workers' secret is
+`PROVIDER credential_chain`, which leaves it to Lance's own object-store client.
 
 **Checking it.** `seshi doctor --config <seshi.toml>` runs `SELECT count(*) FROM sessions` in a
 worker of its own, which loads DuckDB and its `lance` extension and reads the index with the

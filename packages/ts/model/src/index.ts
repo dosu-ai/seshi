@@ -180,7 +180,25 @@ export {
   type SearchResult,
   type SearchResults,
   type SearchSort,
+  type SessionList,
+  type SessionListRequest,
+  type SessionSummary,
 } from "./search";
+export {
+  CONDENSED_TOOL_CHARS,
+  DEFAULT_READ_CONTEXT,
+  EVENT_ROLES,
+  MAX_READ_CHARS,
+  MAX_READ_CONTEXT,
+  MIN_READ_CHARS,
+  SESSION_READ_MODES,
+  type SessionEvent,
+  type SessionEvents,
+  type SessionEventsRequest,
+  type SessionHeader,
+  type SessionReadMode,
+  type SessionTokens,
+} from "./session-events";
 export type {
   AssembledSpans,
   ReceivedSpan,

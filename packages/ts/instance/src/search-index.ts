@@ -252,7 +252,11 @@ export function sqlWorkerEnv(
     ? // Only the read-only keys: none of the server's own, from config or its environment.
       lanceUri(url, { ...accessFor(config), credentials: storage }, withoutKeys(env))
     : lanceLocation(config, deployment, env);
-  const out: Record<string, string> = { [SQL_STORAGE_ENV]: JSON.stringify(where.storageOptions) };
+  const folder = schemeOf(url) === "file";
+  // A folder index needs no secret; a bucket gets one even without keys (the machine's own).
+  const out: Record<string, string> = folder
+    ? {}
+    : { [SQL_STORAGE_ENV]: JSON.stringify(where.storageOptions) };
   // Application Default Credentials from a key file: the index's own credential on GCS.
   if (!storage && schemeOf(url) === "gs" && env.GOOGLE_APPLICATION_CREDENTIALS) {
     out.GOOGLE_APPLICATION_CREDENTIALS = env.GOOGLE_APPLICATION_CREDENTIALS;
@@ -260,7 +264,7 @@ export function sqlWorkerEnv(
   const extensions = config.search.sql.extensions;
   if (extensions) out[DUCKDB_EXTENSIONS_ENV] = extensions;
   // A folder index has no credential to narrow; a bucket's own credential can write.
-  return { env: out, ownCredential: storage === undefined && schemeOf(url) !== "file" };
+  return { env: out, ownCredential: storage === undefined && !folder };
 }
 
 /** `[search.sql.storage]`, the sql workers' read-only credential, as `openStore` takes it at

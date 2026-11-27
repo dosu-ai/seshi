@@ -3,23 +3,39 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import type { ReviewDecision } from "@seshi/client";
 import {
+  type EventRole,
   isRenderFormat,
+  labelPairs,
   RENDER_FORMATS,
   type RenderFormat,
+  type SessionEventsRequest,
   type SessionMetadata,
   type SessionsPage,
   type Trace,
   type Visibility,
 } from "@seshi/model";
 import { type Account, openAccount } from "../account/account";
-import { type Backend, type DeleteConfirmation, openBackend } from "../backend";
+import {
+  type Backend,
+  type DeleteConfirmation,
+  openBackend,
+  parseSessionRef,
+  type SessionRef,
+} from "../backend";
 import { EXIT } from "../cli/exit";
 import { failWith, Refused } from "../cli/failures";
 import { emit, fail, helpOrUsageError, takeJson } from "../cli/output";
 import { printable, type Style, styleFor } from "../cli/style";
+import { eventsLines, listLines as summaryLines, timeOrAge } from "../session-text";
 import type { CommandContext } from "./index";
 
 const USAGE = `usage: seshi sessions ls [--owner <id>] [--limit N] [--after <cursor>] [--all] [--subagents]
+       seshi sessions recent [--owner <id>] [--agent <a>] [--repo <r>] [--branch <b>] [--harness <h>]
+                             [--model <m>] [--label key=value]… [--source <id>]
+                             [--since <time|7d>] [--until <time|7d>] [--limit N] [--after <cursor>]
+       seshi sessions read <session> [--from N] [--to N] | [--around N [--context N]] | [--event N [--offset N]]
+                           [--hash <trace>] [--full] [--roles user,assistant,…] [--max-chars N] [--head <h>]
+                           (<session>: <format> <session-id>, format/session-id or owner/archive-id)
        seshi sessions show <format> <session-id> [--owner <id>] [--trace]
        seshi sessions export <format> <session-id> [--format seshi|letta|otlp|atif] [--hash <h>] [-o <file>] [--owner <id>]
        seshi sessions rm <format> <session-id> [--owner <id>] [--yes]
@@ -40,6 +56,25 @@ const OPTIONS = {
   output: { type: "string", short: "o" },
   yes: { type: "boolean", short: "y" },
   "include-private": { type: "boolean" },
+  agent: { type: "string" },
+  repo: { type: "string" },
+  branch: { type: "string" },
+  harness: { type: "string" },
+  model: { type: "string" },
+  label: { type: "string", multiple: true },
+  source: { type: "string" },
+  since: { type: "string" },
+  until: { type: "string" },
+  from: { type: "string" },
+  to: { type: "string" },
+  around: { type: "string" },
+  context: { type: "string" },
+  event: { type: "string" },
+  offset: { type: "string" },
+  full: { type: "boolean" },
+  roles: { type: "string" },
+  "max-chars": { type: "string" },
+  head: { type: "string" },
 } as const;
 
 interface Values {
@@ -55,9 +90,28 @@ interface Values {
   hash?: string;
   output?: string;
   yes?: boolean;
+  agent?: string;
+  repo?: string;
+  branch?: string;
+  harness?: string;
+  model?: string;
+  label?: string[];
+  source?: string;
+  since?: string;
+  until?: string;
+  from?: string;
+  to?: string;
+  around?: string;
+  context?: string;
+  event?: string;
+  offset?: string;
+  full?: boolean;
+  roles?: string;
+  "max-chars"?: string;
+  head?: string;
 }
 
-const SUBCOMMANDS = ["ls", "list", "show", "export", "rm", "visibility"] as const;
+const SUBCOMMANDS = ["ls", "list", "recent", "read", "show", "export", "rm", "visibility"] as const;
 
 class UsageError extends Error {}
 
@@ -311,6 +365,115 @@ async function ls(
   return EXIT.ok;
 }
 
+function whenArg(value: string | undefined, name: string): string | undefined {
+  if (value === undefined) return undefined;
+  const at = timeOrAge(value, new Date());
+  if (at === undefined) {
+    throw new UsageError(`--${name} must be a time (2026-11-01, RFC 3339) or an age (7d, 12h)`);
+  }
+  return at;
+}
+
+function wholeArg(value: string | undefined, name: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (!/^\d{1,9}$/.test(value)) throw new UsageError(`--${name} must be a whole number`);
+  return Number(value);
+}
+
+async function recent(
+  ctx: CommandContext,
+  json: boolean,
+  backend: Backend,
+  values: Values,
+): Promise<number> {
+  let labels: Record<string, string> | undefined;
+  if (values.label !== undefined && values.label.length > 0) {
+    const parsed = labelPairs(values.label);
+    if ("problem" in parsed) throw new UsageError(`--label: ${parsed.problem}`);
+    labels = parsed.labels;
+  }
+  const since = whenArg(values.since, "since");
+  const until = whenArg(values.until, "until");
+  const limit = wholeArg(values.limit, "limit");
+  const list = await backend.searchSessions(
+    {
+      ...(values.owner !== undefined ? { owner: values.owner } : {}),
+      ...(values.agent !== undefined ? { agent: values.agent } : {}),
+      ...(values.repo !== undefined ? { repo: values.repo } : {}),
+      ...(values.branch !== undefined ? { branch: values.branch } : {}),
+      ...(values.harness !== undefined ? { harness: values.harness } : {}),
+      ...(values.model !== undefined ? { model: values.model } : {}),
+      ...(labels !== undefined ? { labels } : {}),
+      ...(values.source !== undefined ? { source: values.source } : {}),
+      ...(since !== undefined ? { since } : {}),
+      ...(until !== undefined ? { until } : {}),
+      ...(limit !== undefined ? { limit } : {}),
+      ...(values.after !== undefined ? { after: values.after } : {}),
+    },
+    {
+      building: () => {
+        if (!json) ctx.stderr("seshi: building the search index from the change feed (first use)…");
+      },
+    },
+  );
+  emit(ctx, json, list, () => [
+    `sessions overlapping ${list.window.since} → ${list.window.until ?? "now"}, newest first:`,
+    ...summaryLines(list).map((l) =>
+      l.startsWith("after: ") ? `more: seshi sessions recent --after ${l.slice(7)}` : l,
+    ),
+  ]);
+  return EXIT.ok;
+}
+
+/** The session `read` names: one argument (`format/id`, `owner/archive_id`, a URL) or two
+ * (`<format> <session-id>`). */
+function readRef(positionals: readonly string[], owner: string | undefined): SessionRef {
+  if (positionals.length === 1) {
+    const ref = parseSessionRef(positionals[0] as string);
+    if (ref === undefined) {
+      throw new UsageError("name a session: <format> <session-id>, format/id or owner/archive-id");
+    }
+    return "archiveId" in ref || owner === undefined ? ref : { ...ref, owner };
+  }
+  const { format, sessionId, rest } = sessionRef(positionals);
+  if (rest.length > 0) throw new UsageError("sessions read takes one session");
+  return { format, sessionId, ...(owner !== undefined ? { owner } : {}) };
+}
+
+async function read(
+  ctx: CommandContext,
+  json: boolean,
+  backend: Backend,
+  ref: SessionRef,
+  values: Values,
+): Promise<number> {
+  const request: SessionEventsRequest = {};
+  for (const [name, key] of [
+    ["from", "from"],
+    ["to", "to"],
+    ["around", "around"],
+    ["context", "context"],
+    ["event", "event"],
+    ["offset", "offset"],
+    ["max-chars", "max_chars"],
+  ] as const) {
+    const n = wholeArg(values[name], name);
+    if (n !== undefined) request[key] = n;
+  }
+  if (values.full) request.mode = "full";
+  if (values.roles !== undefined) {
+    request.roles = values.roles
+      .split(",")
+      .map((r) => r.trim())
+      .filter((r) => r !== "") as EventRole[];
+  }
+  if (values.head !== undefined) request.head = values.head;
+  if (values.hash !== undefined) request.trace = values.hash;
+  const events = await backend.sessionEvents(ref, request);
+  emit(ctx, json, events, () => eventsLines(events));
+  return EXIT.ok;
+}
+
 async function found(
   backend: Backend,
   format: string,
@@ -550,8 +713,11 @@ export async function run(ctx: CommandContext): Promise<number> {
   let backend: Backend | undefined;
   try {
     let ref: { format: string; sessionId: string; rest: string[] } | undefined;
-    if (sub === "ls" || sub === "list") {
-      if (positionals.length > 0) throw new UsageError("sessions ls takes no arguments");
+    let named: SessionRef | undefined;
+    if (sub === "ls" || sub === "list" || sub === "recent") {
+      if (positionals.length > 0) throw new UsageError(`sessions ${sub} takes no arguments`);
+    } else if (sub === "read") {
+      named = readRef(positionals, values.owner);
     } else {
       ref = sessionRef(positionals);
       const extra = sub === "visibility" ? 1 : 0;
@@ -585,6 +751,10 @@ export async function run(ctx: CommandContext): Promise<number> {
       case "ls":
       case "list":
         return await ls(ctx, json, backend, values, style);
+      case "recent":
+        return await recent(ctx, json, backend, values);
+      case "read":
+        return await read(ctx, json, backend, named as SessionRef, values);
       case "show":
         return await show(ctx, json, backend, ref as NonNullable<typeof ref>, values, style);
       case "export":

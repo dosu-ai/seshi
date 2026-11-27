@@ -1,3 +1,4 @@
+import { isAbsolute } from "node:path";
 import { DEFAULT_SEARCH_MAX_CHARS, MAX_SEARCH_CHARS } from "@seshi/model";
 import * as z from "zod";
 import { bytes, duration } from "../units";
@@ -160,9 +161,11 @@ export const sqlSection = z
     extensions: z
       .string()
       .min(1)
+      // The sql workers run in a private temporary folder: a relative path would mean nothing.
+      .refine(isAbsolute, "must be an absolute path")
       .optional()
       .describe(
-        "The folder holding DuckDB's extensions (<folder>/<duckdb version>/<platform>/lance.duckdb_extension), for sql on a LanceDB index. Default: duckdb/ beside the seshi binary, where the seshi-server-sql archive and image put it.",
+        "The folder holding DuckDB's extensions (<folder>/<duckdb version>/<platform>/lance.duckdb_extension), an absolute path, for sql on a LanceDB index. Default: duckdb/ beside the seshi binary, where the seshi-server-sql archive and image put it.",
       ),
     storage: bucketCredentials
       .optional()
