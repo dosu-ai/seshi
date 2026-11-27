@@ -5,6 +5,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { ensureLayout, FsStore } from "@seshi/store";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { INTEGRATIONS } from "../integrations";
@@ -18,12 +19,13 @@ beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "seshi-doctor-sql-"));
   home = join(dir, "home");
   mkdirSync(home);
-  const bucket = `file://${join(dir, "bucket")}`;
+  const bucket = pathToFileURL(join(dir, "bucket")).href;
   await ensureLayout(new FsStore(bucket), { createdBy: "test" });
   toml = join(dir, "seshi.toml");
   writeFileSync(
     toml,
-    `[store]\nurl = "${bucket}"\n[search]\npath = "${join(dir, "index.sqlite")}"\n`,
+    // JSON's escapes are TOML's: a Windows path's backslashes stay backslashes.
+    `[store]\nurl = ${JSON.stringify(bucket)}\n[search]\npath = ${JSON.stringify(join(dir, "index.sqlite"))}\n`,
     { mode: 0o600 },
   );
 });
@@ -41,7 +43,11 @@ async function seshi(argv: string[]) {
   return { code, out: out.join("\n"), err: err.join("\n") };
 }
 
-describe("seshi doctor --config, sql", () => {
+// A server's own checks, which stay Linux-only like the server commands (vitest.laptop.config.ts
+// runs this folder on Windows for the laptop doctor).
+const server = process.platform === "win32" ? describe.skip : describe;
+
+server("seshi doctor --config, sql", () => {
   it("runs a statement in a worker and reports the workers that ran it", async () => {
     // The index is built by the first search, as a SQLite server's own would be.
     expect((await seshi(["search", "anything", "--config", toml, "--json"])).code).toBe(0);
@@ -63,7 +69,7 @@ describe("seshi doctor --config, sql", () => {
   }, 60_000);
 });
 
-describe("seshi search --status, sql", () => {
+server("seshi search --status, sql", () => {
   it("says what answers sql and that this process has no workers", async () => {
     const status = await seshi(["search", "--status", "--config", toml, "--json"]);
     expect(status.code, status.err).toBe(0);
@@ -72,7 +78,9 @@ describe("seshi search --status, sql", () => {
     expect(text.out).toContain("sql: SQLite, in worker processes");
     expect(text.out).toContain("sql workers: none in this process");
   });
+});
 
+describe("sqlStatusLines", () => {
   it("names DuckDB's credential, or the build that carries it", () => {
     const pool = { workers: 2, busy: 1, queued: 0, restarts: 3 };
     expect(sqlStatusLines({ engine: "duckdb", credential: "read-only", workers: pool })).toEqual([
