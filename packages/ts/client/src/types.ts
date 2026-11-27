@@ -6,7 +6,8 @@ export type Scope =
   | "sessions:delete"
   | "search"
   | "sources:admin"
-  | "tokens:admin";
+  | "tokens:admin"
+  | "sql";
 
 export type TokenKind = "org" | "admin" | "device" | "service";
 

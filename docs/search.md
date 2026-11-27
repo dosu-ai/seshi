@@ -1,7 +1,8 @@
 # Search
 
-`seshi search` and `GET /v1/search` find sessions by what was said and done in them (F10). The
-first half of this page is for people searching; the second is for whoever runs the server.
+`seshi search` and `GET /v1/search` find sessions by what was said and done in them (F10), and
+`seshi sql` answers questions across them ([below](#sql)). The first half of this page is for
+people searching; the second is for whoever runs the server.
 
 ## Searching
 
@@ -115,6 +116,110 @@ uploaded in chunks has a trace per chunk); a replace numbers them again, which `
 
 `--json` prints the API's `SessionList` and `SessionEvents`. In serverless mode both read the
 bucket and this machine's index, as `seshi search` does.
+
+## SQL
+
+```sh
+seshi sql "SELECT owner, count(*) AS sessions FROM sessions GROUP BY 1 ORDER BY 2 DESC"
+seshi sql --schema
+seshi sql "SELECT tool_name, count(*) FROM events WHERE role = 'tool_result' AND NOT ok GROUP BY 1" --since 7d --json
+```
+
+`seshi sql` and `POST /v1/sql` answer questions across sessions with one read-only `SELECT`
+over three views of the search index: `sessions` (one row per session), `events` (its indexed
+records, with `seq`, `role`, `tool_name`, `tool_call_id`, `ok`, `chars` and `text`) and
+`llm_calls` (every model request, with its tokens). `seshi sql --schema` and `GET
+/v1/sql/schema` give their columns, with types and comments, the dialect and three examples.
+Use `search` to find words and `seshi sessions read` to read a session; `sql` is for counting,
+grouping and joining.
+
+On a SQLite index the statement runs in SQLite itself, so it is written in SQLite's dialect:
+
+- times are UTC text, `YYYY-MM-DD HH:MM:SS.SSS`, so `ts > datetime('now', '-30 days')` and
+  `strftime('%Y-%m', started_at)` work, and text order is time order;
+- `models` is a JSON array and `labels` a JSON object: `EXISTS (SELECT 1 FROM json_each(models)
+  WHERE value = 'claude-opus-5-5')`, `labels ->> '$.team'`;
+- `ok` is `0` or `1` (`NULL` for a record that does not say), and there is no `GROUP BY ALL`:
+  `GROUP BY 1, 2`;
+- `text` is the indexed text, cut to its role's [cap](#how-much-of-each-record-is-indexed);
+  `chars` is the record's full length.
+
+```sql
+-- Tokens per person and model, last 30 days
+SELECT s.owner, c.model, sum(c.input_tokens + c.output_tokens) AS tokens
+FROM llm_calls c JOIN sessions s USING (owner, archive_id)
+WHERE c.started_at > datetime('now', '-30 days') GROUP BY 1, 2 ORDER BY tokens DESC;
+```
+
+**The window.** The views hold the sessions that overlap `--since` and `--until` (`since` and
+`until` in the request): a date, an RFC 3339 time or an age (`7d`), the last 30 days by default,
+at most 400 days. A statement cannot widen it: the views are built for each statement, with the
+window and who is asking written in.
+
+**What a statement may be.** One `SELECT`: set operations, CTEs and `WITH RECURSIVE`,
+subqueries, `VALUES`, every kind of join, window functions and `FILTER`. It reads only the
+three views and its own CTEs, by their plain names (`main.events` is refused), calls only the
+[functions SQLite's list allows](../packages/ts/search/src/sql/functions.ts) (aggregates,
+window functions, text, time, JSON and numbers; not `load_extension`, `randomblob`, FTS5's
+`snippet` or anything that reads files or settings), and is at most 16 KiB. Anything else is
+refused before it runs, saying what and where: `seshi sql` prints the line with a caret under
+it, and the API gives `at`, the character's offset.
+
+| Limit | Default | Setting |
+|---|---|---|
+| Time | 15 s: the worker running it is killed and replaced | `search.sql.timeout` |
+| Memory | 1 GiB inside SQLite (held on Linux, where Bun carries its own SQLite; macOS's system SQLite ignores it), and the worker is killed above 2 GiB resident | `search.sql.memory`, `search.sql.worker_memory` |
+| Rows | 1,000 and 1 MB of them, then `truncated` (`--max-rows` asks for fewer) | `search.sql.max_rows` |
+| Concurrency | 2 workers, 8 statements waiting, 2 running per caller; then `429 sql_busy` | `search.sql.workers` |
+
+**Who may.** `sql` needs the `sql` scope. Admins have it; a service token can be given it
+(`seshi tokens create service --service reports --scope search --scope sql`); members do not.
+On a serverless laptop `seshi sql` reads the laptop's own index as its user, with the
+visibility rule `seshi search` follows (your sessions and the org's; `--include-private` for
+owner-only ones too) and the window still applied; the answer says `as <you> (local index)`. Other places are as for `seshi search`
+([above](#searching)): a server (`--server`, `--token`), or in-process with its config
+(`--config`).
+
+**SQLite `sql` is not for production use with members.** `bun:sqlite` has no authorizer, no
+interrupt and no limit on attached databases, so what keeps a statement to the views is the
+statement check alone: SQLite's own tokens (a port of its tokenizer), a parser's tree
+(sqlparser-rs, in its SQLite dialect) and then SQLite's `EXPLAIN` of the statement (every table
+it opens must be one the views read, nothing written, every function on the list). That is
+enough for admins and service tokens, who can read every session anyway; it is not a wall to
+put between members and each other's owner-only sessions. A SQLite server refuses to start with
+`[search.sql] members = true`, naming the LanceDB backend, where members' `sql` will come with
+DuckDB and its own gates ([design](seshi/session-tools.md#who-may-use-it)). On a LanceDB index
+`sql` answers `501 sql_unavailable` for now.
+
+**How it runs.** Each statement runs in a worker process, `seshi sql-worker`, which every seshi
+binary has: the server keeps `search.sql.workers` of them (2; 1 on a laptop), started with the
+first statement, each running one at a time. A worker opens the index file read-only, creates
+the three views as `TEMP` views with the caller's scope, turns on `query_only`, checks the
+statement, and reads at most `max_rows` rows. A query in SQLite cannot be stopped from inside,
+so the server kills a worker that runs past the timeout or whose memory passes
+`search.sql.worker_memory`, answers `sql_timeout` or `sql_memory`, and starts another. Workers
+get an environment of their own (a private `HOME` and `TMPDIR`, `PATH`): no seshi settings,
+tokens or keys. A worker that dies mid-statement answers `500`, and the next statement runs on a
+new one. An index kept in memory (`search.path = ":memory:"`) has no file for a worker to read:
+`501 sql_unavailable`.
+
+| `POST /v1/sql` answers | |
+|---|---|
+| `200` | `{now, scope: {as, role, since, until}, index: {backend, dialect, updated_at}, columns: [{name, type}], rows: [[…]], truncated, elapsed_ms}` |
+| `400 sql_refused` | The statement check refused it: `message` says what, `at` where |
+| `400 sql_error` | SQLite could not compile it: an unknown column, a syntax it does not take |
+| `400 sql_timeout`, `sql_memory` | A limit stopped it |
+| `400 sql_runtime` | It failed while running (malformed JSON, an integer overflow). A member would get no message, which could quote a row |
+| `400 bad_field` | The body: an unknown field, a window that is not one or longer than 400 days |
+| `403 forbidden` | No `sql` scope |
+| `429 sql_busy` | Two of the caller's statements are running, or eight are waiting |
+| `501 sql_unavailable` | A LanceDB index (for now), or a SQLite index in memory |
+| `503 index_unavailable` | The index has not caught up with the change feed yet |
+
+`seshi sql` exits 0 with an answer, 1 when the worker running it failed, 2 for a statement
+refused or that SQLite cannot run, 3 when nothing is configured, 5 without the scope or a
+sign-in, 7 when the server, the index or the workers cannot answer, and 9 where `sql` is not
+available.
 
 ## How the index works
 

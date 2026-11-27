@@ -18,7 +18,7 @@ info:
     `Authorization: Bearer <token>` (X5): the org key with the caller's username in
     `X-Seshi-User`, a session, device, admin or service token, or a static token from config.
     The credential names the caller's owner ID and carries scopes (`sessions:write`,
-    `sessions:read`, `sessions:delete`, `search`, `sources:admin`, `tokens:admin`). A caller
+    `sessions:read`, `sessions:delete`, `search`, `sources:admin`, `tokens:admin`, `sql`). A caller
     writes only its own sessions; it reads its own and those whose visibility is `org`, or
     everything as an admin or a service reader. Reads take `?owner=` to read another owner's
     sessions; a session the caller may not read answers `404`. Request bodies may be sent
@@ -53,6 +53,7 @@ tags:
   - name: capture
   - name: otlp
   - name: search
+  - name: sql
 
 paths:
   /healthz:
@@ -1661,6 +1662,141 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
 
+  /v1/sql:
+    post:
+      tags: [sql]
+      summary: One read-only SELECT over sessions, events and llm_calls.
+      operationId: sql
+      description: |
+        Runs one statement over three views of the search index: `sessions`, `events` and
+        `llm_calls` (`GET /v1/sql/schema` gives their columns). On a SQLite index it runs in
+        SQLite itself, in the SQLite dialect, in a worker process over the index file. Needs
+        the `sql` scope: admins have it and service tokens can be given it; on SQLite it is not
+        for production use with members, and members never get it.
+
+        The views are built for each statement from the caller and the window, never from the
+        statement: sessions overlapping `[since, until)` (the last 30 days by default, at most
+        400), not removed, and for a member their own and the org's. The statement must be one
+        `SELECT` (set operations, CTEs, subqueries and `VALUES` too) that reads only the three
+        views and CTEs, calls only allowed functions and is at most 16 KiB; everything else is
+        refused before it runs, with where (`at`). A statement runs at most 15 s and returns at
+        most 1,000 rows and 1 MB of them (`truncated`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SqlRequest" }
+      responses:
+        "200":
+          description: The rows, with who it was answered as and the index it read.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SqlResult" }
+        "400":
+          description: |
+            `sql_refused`: the statement check refused it (`message` says what, `at` where).
+            `sql_error`: SQLite could not compile it (an unknown column, a syntax it does not
+            take). `sql_timeout`, `sql_memory`: a limit stopped it. `sql_runtime`: it failed
+            while running (a member gets no message, which could quote a row). `bad_json`,
+            `missing_field`, `bad_field`: the body (an unknown field, a window that is not one,
+            or longer than 400 days).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: "`search_disabled`: this server has `search.enabled = false`."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429":
+          description: |
+            `sql_busy`: the caller has two statements running already, or eight are waiting for
+            a worker. `Retry-After` says when to ask again.
+          headers:
+            Retry-After:
+              description: Seconds to wait.
+              schema: { type: integer }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "500":
+          description: "`internal`: the worker running the statement failed; the next one runs on a new worker."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "501":
+          description: |
+            `sql_unavailable`: this index cannot answer `sql`: a LanceDB index (until the
+            `seshi-server-sql` image), or a SQLite index kept in memory.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          description: |
+            `index_unavailable`: the index has not caught up with the change feed yet.
+            `Retry-After` says when to ask again.
+          headers:
+            Retry-After:
+              description: Seconds to wait.
+              schema: { type: integer }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /v1/sql/schema:
+    get:
+      tags: [sql]
+      summary: What a sql statement may read here, in this server's dialect.
+      operationId: sqlSchema
+      description: |
+        The dialect, a line on how to write it, the three views' DDL with each column's type
+        and comment, examples, the limits, and the scope and window a statement would be
+        answered under. Needs the `sql` scope; a client can call it to learn whether this
+        server answers `sql` for this credential.
+      parameters:
+        - name: since
+          in: query
+          description: The window's start, an RFC 3339 time or an age (`30d`); 30 days ago by default.
+          schema: { type: string }
+        - name: until
+          in: query
+          description: The window's end; now by default.
+          schema: { type: string }
+      responses:
+        "200":
+          description: The schema.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SqlSchema" }
+        "400":
+          description: "`bad_query`: an unknown parameter, or a window that is not one."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: "`search_disabled`: this server has `search.enabled = false`."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "501":
+          description: "`sql_unavailable`: this index cannot answer `sql` (as for `POST /v1/sql`)."
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          description: "`index_unavailable`: the index has not caught up with the change feed yet."
+          headers:
+            Retry-After:
+              description: Seconds to wait.
+              schema: { type: integer }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
   /v1/admin/sources:
     get:
       tags: [admin]
@@ -2259,7 +2395,7 @@ components:
 
     Scope:
       type: string
-      enum: [sessions:write, sessions:read, sessions:delete, search, sources:admin, tokens:admin]
+      enum: [sessions:write, sessions:read, sessions:delete, search, sources:admin, tokens:admin, sql]
 
     TokenKind:
       type: string
@@ -2699,6 +2835,10 @@ components:
               type: array
               items: { type: string }
               description: Each thing wrong, one a line, when there are several.
+            at:
+              type: integer
+              minimum: 0
+              description: Where a refused `sql` statement goes wrong, as an offset into it (`sql_refused`).
       example:
         error: { code: "unauthorized", message: "a valid token is required" }
 
@@ -3449,6 +3589,96 @@ components:
       properties:
         code: { type: integer, description: "A google.rpc.Code (3 invalid argument, 7 permission denied, 14 unavailable, 16 unauthenticated)." }
         message: { type: string }
+
+    SqlRequest:
+      type: object
+      additionalProperties: false
+      required: [sql]
+      properties:
+        sql:
+          type: string
+          minLength: 1
+          description: One SELECT over sessions, events and llm_calls, at most 16 KiB.
+        since:
+          type: [string, "null"]
+          description: The window's start, an RFC 3339 time or an age (`30d`); 30 days before `until` by default.
+        until:
+          type: [string, "null"]
+          description: The window's end; now by default. A window is at most 400 days.
+        max_rows:
+          type: integer
+          minimum: 1
+          description: Rows to return at most; the server's `search.sql.max_rows` (1,000) caps it.
+
+    SqlScope:
+      type: object
+      required: [as, role, since, until]
+      properties:
+        as: { type: string, description: The owner the statement was answered as. }
+        role:
+          type: string
+          description: "`admin`, `service` or `member`; `local` on a serverless laptop's own index."
+        since: { type: string, format: date-time }
+        until: { type: string, format: date-time }
+
+    SqlIndexInfo:
+      type: object
+      required: [backend, dialect]
+      properties:
+        backend: { type: string, enum: [sqlite, lance] }
+        dialect: { type: string, enum: [sqlite, duckdb] }
+        generation: { type: string }
+        updated_at:
+          type: string
+          format: date-time
+          description: When the index last caught up with the change feed.
+
+    SqlColumn:
+      type: object
+      required: [name, type]
+      properties:
+        name: { type: string }
+        type: { type: string, description: "The engine's type: `TEXT`, `INTEGER`, `REAL`, `BLOB` or `NULL` on SQLite." }
+
+    SqlResult:
+      type: object
+      required: [now, scope, index, columns, rows, truncated, elapsed_ms]
+      properties:
+        now: { type: string, format: date-time, description: When it was answered. }
+        scope: { $ref: "#/components/schemas/SqlScope" }
+        index: { $ref: "#/components/schemas/SqlIndexInfo" }
+        columns:
+          type: array
+          items: { $ref: "#/components/schemas/SqlColumn" }
+        rows:
+          type: array
+          description: One array per row, its values in the order of `columns`; a blob as hex.
+          items: { type: array, items: {} }
+        truncated:
+          type: boolean
+          description: It stopped at `max_rows` or 1 MB of rows; add LIMIT or aggregate.
+        elapsed_ms: { type: integer, minimum: 0 }
+
+    SqlSchema:
+      type: object
+      required: [dialect, hint, ddl, examples, scope, index, limits]
+      properties:
+        dialect: { type: string, enum: [sqlite, duckdb] }
+        hint: { type: string, description: How to write the dialect, in one line. }
+        ddl: { type: string, description: "The views' `CREATE VIEW`, with each column's type and comment." }
+        examples:
+          type: array
+          items: { type: string }
+        scope: { $ref: "#/components/schemas/SqlScope" }
+        index: { $ref: "#/components/schemas/SqlIndexInfo" }
+        limits:
+          type: object
+          required: [max_rows, max_bytes, timeout_ms, max_sql_bytes]
+          properties:
+            max_rows: { type: integer }
+            max_bytes: { type: integer }
+            timeout_ms: { type: integer }
+            max_sql_bytes: { type: integer }
 
     SearchResults:
       type: object

@@ -244,6 +244,7 @@
     "packages/ts/search": {
       "name": "@seshi/search",
       "dependencies": {
+        "@guanmingchiu/sqlparser-ts": "0.64.0",
         "@seshi/auth": "workspace:*",
         "@seshi/model": "workspace:*",
         "@seshi/store": "workspace:*",
@@ -284,6 +285,9 @@
         "@seshi/model": "workspace:*",
       },
     },
+  },
+  "patchedDependencies": {
+    "@guanmingchiu/sqlparser-ts@0.64.0": "patches/@guanmingchiu%2Fsqlparser-ts@0.64.0.patch",
   },
   "overrides": {
     "@huggingface/transformers": "file:./packages/ts/search/lance/no-embeddings",
@@ -329,6 +333,8 @@
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@2.6.2", "", { "os": "win32", "cpu": "x64" }, "sha512-FVlWD+mDDz8nN5LWKRWUhhb7wKIK0VE3oXQvQBX7Fwwj00CvqMVhMyiz1iz8O5aZGmnkhFlKSwJPrUvMh5prQw=="],
 
     "@colors/colors": ["@colors/colors@1.5.0", "", {}, "sha512-ooWCrlZP11i8GImSjTHYHLkvFDP48nS4+204nGb1RiX/WXYHmJA2III9/e2DWVabCESdW7hBAEzHRqUn9OUVvQ=="],
+
+    "@guanmingchiu/sqlparser-ts": ["@guanmingchiu/sqlparser-ts@0.64.0", "", {}, "sha512-5o3FKIM0P7mG3UVnEGDBMPJRKtnBeSPRQeQY7ac6y9TNdAtTqCleXpJ/1TiYLZXmOrebtSBekZofKhkHTOFx4Q=="],
 
     "@hono/node-server": ["@hono/node-server@2.1.11", "", { "peerDependencies": { "hono": "^4 || ^5.0.0-0" } }, "sha512-KzKz9vl4vvr1vgLHamj+g5uonbrj5NwAdO3yzOS6cd2HjALVeOgTgeZOyAzNxejbkfOOPIcvuf/Tg8l1pEFLog=="],
 
@@ -758,7 +764,7 @@
 
     "highlight.js": ["highlight.js@10.7.3", "", {}, "sha512-tzcUFauisWKNHaRkN4Wjl/ZA07gENAjFl3J/c480dprkGTg5EQstgaNFqBfUqCq54kZRIEcreTsAgF/m2quD7A=="],
 
-    "hono": ["hono@4.13.22", "", {}, "sha512-wncKd5/40Pj8grx0RZ2fgNIicFEmVFwIHT5UFLTnphR8I6AQWFf9c2JoM6ZJ9g8y4pMzg3sNlCVNe0m2Yclg0Q=="],
+    "hono": ["hono@4.13.23", "", {}, "sha512-OS90dj7dcsftEEWCOef8jRbnHE5lbrOq0hNRqjSyPsOnaGZvvfof1KS05hQNb4kUOCfDq1mG3PmHoX37DMnHQg=="],
 
     "hook-std": ["hook-std@4.0.0", "", {}, "sha512-IHI4bEVOt3vRUDJ+bFA9VUJlo7SzvFARPNLw75pqSmAOP2HmTWfFJtPvLBrDrlgjEYXY9zs7SFdHPQaJShkSCQ=="],
 

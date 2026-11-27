@@ -31,6 +31,40 @@ const ok = (tree: Record<string, unknown>): ServerConfig => {
   return result.data;
 };
 
+describe("search.sql", () => {
+  it("has the limits docs/search.md gives by default", () => {
+    expect(ok({}).search.sql).toEqual({
+      timeout: 15_000,
+      memory: 1024 ** 3,
+      worker_memory: 2 * 1024 ** 3,
+      max_rows: 1000,
+      members: false,
+    });
+    expect(
+      ok({ search: { sql: { workers: 4, timeout: "30s", memory: "256MiB" } } }).search.sql,
+    ).toMatchObject({ workers: 4, timeout: 30_000, memory: 256 * 1024 ** 2 });
+  });
+
+  it("refuses members = true on a SQLite index, which is not for production use with members", () => {
+    expect(messages({ search: { sql: { members: true } } })).toEqual([
+      'search.sql.members: needs backend = "lance": sql on a SQLite index has no wall below its statement check and is not for production use with members (docs/search.md)',
+    ]);
+    expect(ok({ search: { backend: "lance", sql: { members: true } } }).search.sql.members).toBe(
+      true,
+    );
+  });
+
+  it("refuses limits it cannot keep", () => {
+    expect(messages({ search: { sql: { max_rows: 5000, timeout: "100ms", workers: 0 } } })).toEqual(
+      [
+        "search.sql.workers: Too small: expected number to be >=1",
+        "search.sql.timeout: must be at least 1s",
+        "search.sql.max_rows: Too big: expected number to be <=1000",
+      ],
+    );
+  });
+});
+
 describe("parseListen", () => {
   it("reads host:port, :port and port", () => {
     expect(parseListen(":7200")).toEqual({ hostname: "0.0.0.0", port: 7200 });

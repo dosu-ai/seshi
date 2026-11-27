@@ -199,7 +199,9 @@ export {
   lanceSection,
   SEARCH_BACKENDS,
   type SearchSection,
+  type SqlSection,
   searchSection,
+  sqlSection,
 } from "./search";
 export {
   MIN_SEALING_KEY_LENGTH,

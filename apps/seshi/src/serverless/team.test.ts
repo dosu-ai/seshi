@@ -189,6 +189,28 @@ describe("two laptops on one bucket (F11.4, F11.5)", () => {
     expect(all.sessions.map((s) => s.session_id).sort()).toEqual(["open", "secret"]);
   });
 
+  it("answers sql with the visibility rule search follows", async () => {
+    const bob = await laptop("bob", member("bob"));
+    const sessions = bob.bucket.instance.localSessions("bob", "claimed");
+    await sessions.ingest(upload("open"));
+    await sessions.ingest({ ...upload("private"), visibility: "owner" });
+    // The transcript is from September: outside the default 30 days, inside 400.
+    const request = {
+      sql: "SELECT DISTINCT s.session_id FROM sessions s JOIN events e USING (archive_id) ORDER BY 1",
+      since: "400d",
+    };
+    const alice = await laptop("alice", member("alice"), { write: false });
+    expect((await alice.backend.sql(request)).rows).toEqual([["open"]]);
+    expect((await bob.backend.sql(request)).rows).toEqual([["open"], ["private"]]);
+    // --include-private, over an index that holds every session (search.scope = "all").
+    const curious = await laptop("alice", member("alice"), {
+      includePrivate: true,
+      scope: "all",
+      write: false,
+    });
+    expect((await curious.backend.sql(request)).rows).toEqual([["open"], ["private"]]);
+  });
+
   it("fills a page past sessions the viewer may not read", async () => {
     const alice = await laptop("alice", member("alice"));
     const sessions = alice.bucket.instance.localSessions("alice", "claimed");
@@ -329,6 +351,25 @@ describe("shared settings (F11.6)", () => {
       `search.backend in ${shared.url}/config/seshi.toml: a server setting; this machine keeps its own SQLite index`,
       `search.lance in ${shared.url}/config/seshi.toml: a server setting; this machine keeps its own SQLite index`,
     ]);
+  });
+
+  it("answers sql over its own index, ignoring the server's members setting (T11)", async () => {
+    await sharedConfig(
+      '[search]\nbackend = "lance"\n[search.sql]\nmembers = true\ntimeout = "5s"\n',
+    );
+    const alice = await laptop("alice", member("alice"));
+    expect(alice.bucket.ignored).toContain(
+      `search.sql.members in ${shared.url}/config/seshi.toml: a server setting`,
+    );
+    expect(alice.bucket.instance.sql?.settings).toMatchObject({ workers: 1, timeout: 5_000 });
+    await alice.bucket.instance.localSessions("alice", "claimed").ingest(upload("s1"));
+    // The transcript is from September: outside the default 30 days, inside 400.
+    const sql = "SELECT owner, agent FROM sessions";
+    expect((await alice.backend.sql({ sql })).rows).toEqual([]);
+    const answer = await alice.backend.sql({ sql, since: "400d" });
+    expect(answer.rows).toEqual([["alice", "claude-code"]]);
+    expect(answer.scope).toMatchObject({ as: "alice", role: "local" });
+    expect((await alice.backend.sqlSchema()).dialect).toBe("sqlite");
   });
 
   it("holds writes when the bucket's copy fails its checks and there is no good one", async () => {

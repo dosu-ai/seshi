@@ -30,6 +30,7 @@ export {
   RUNTIME_JOB,
   readRedactionPacks,
   type SessionIdentity,
+  sqlSettings,
   storeOptions,
 } from "./instance";
 export {

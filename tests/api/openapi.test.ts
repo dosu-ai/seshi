@@ -5,7 +5,7 @@
  * document describes that the server never gives. */
 
 import { createHash } from "node:crypto";
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type App, createApp as appOver } from "@seshi/api";
@@ -21,6 +21,7 @@ import {
 import { RuntimeConfig } from "@seshi/instance";
 import { storeSession } from "@seshi/pipeline";
 import { compileRuleSet, validatePack } from "@seshi/redact";
+import { SearchService } from "@seshi/search";
 import {
   archiveId,
   FsStore,
@@ -288,6 +289,8 @@ describe("the document itself", () => {
         "GET /v1/owners/{owner}/sessions/{archive_id}/reviews",
         "POST /otlp/v1/traces",
         "GET /v1/search",
+        "POST /v1/sql",
+        "GET /v1/sql/schema",
         "GET /v1/search/sessions",
         "GET /v1/admin/sources",
         "GET /v1/admin/sources/{id}",
@@ -1454,6 +1457,136 @@ describe("search (F10)", () => {
     expect((await call("GET", "/v1/search?q=auth", as)).status).toBe(502);
     expect((await call("GET", "/v1/search/sessions?since=3650d", as)).status).toBe(502);
     await instance.close();
+  });
+});
+
+describe("sql (docs/seshi/session-tools.md)", () => {
+  /** An instance whose search index is a file, which sql reads; `config` as TOML. */
+  function sqlInstance(auth: Auth, config = "", sqlWorker?: string[]) {
+    const search = new SearchService({
+      store,
+      deployment: "test",
+      settings: { path: join(dir, `index-${Math.random()}.sqlite`), events: ["user", "assistant"] },
+      feed: true,
+    });
+    return testInstance({
+      store,
+      storage: { url: store.url },
+      auth,
+      search,
+      config,
+      ...(sqlWorker ? { sqlWorker } : {}),
+    });
+  }
+
+  it("answers, refuses and waits as documented", async () => {
+    const auth = new Auth(
+      {
+        staticTokens: [{ token: TOKEN, owner: "acme" }],
+        orgKey: true,
+        admins: [],
+        aliases: {},
+        sessionKeys: { k1: "k".repeat(32) },
+      },
+      { store, deployment: "test" },
+    );
+    const { admin } = await auth.initAdmin({ owner: "ops" });
+    const instance = sqlInstance(auth, '[search.sql]\ntimeout = "1s"\n');
+    const as = { app: appOver(instance), token: admin?.token };
+    const statement = { sql: "SELECT owner, agent FROM sessions", since: "400d" };
+
+    // Until the index has caught up once, it says so.
+    expect((await call("POST", "/v1/sql", { ...as, body: statement })).status).toBe(503);
+    expect((await call("GET", "/v1/sql/schema", as)).status).toBe(503);
+    const body = { format: "claude-code", session_id: "sql1", transcript: CLAUDE };
+    expect((await call("POST", "/v1/sessions", { ...as, token: TOKEN, body })).status).toBe(201);
+    await instance.search?.catchUp();
+
+    const answer = await call("POST", "/v1/sql", { ...as, body: statement });
+    expect(answer.status).toBe(200);
+    expect(answer.body).toMatchObject({
+      scope: { as: "ops", role: "admin" },
+      index: { backend: "sqlite", dialect: "sqlite" },
+      columns: [{ name: "owner" }, { name: "agent" }],
+      rows: [["acme", "claude-code"]],
+      truncated: false,
+    });
+    const schema = await call("GET", "/v1/sql/schema?since=7d", as);
+    expect(schema.status).toBe(200);
+    expect(schema.body).toMatchObject({ dialect: "sqlite", limits: { timeout_ms: 1000 } });
+
+    const refused = await call("POST", "/v1/sql", { ...as, body: { sql: "SELECT * FROM meta" } });
+    expect(refused).toMatchObject({
+      status: 400,
+      body: { error: { code: "sql_refused", at: 14 } },
+    });
+    expect(
+      (await call("POST", "/v1/sql", { ...as, body: { sql: "SELECT 1", since: "500d" } })).body,
+    ).toMatchObject({ error: { code: "bad_field" } });
+    expect((await call("GET", "/v1/sql/schema?nope=1", as)).status).toBe(400);
+
+    expect((await call("POST", "/v1/sql", { ...as, token: null, body: statement })).status).toBe(
+      401,
+    );
+    expect((await call("GET", "/v1/sql/schema", { ...as, token: null })).status).toBe(401);
+    // A static token, as a member's session, has no sql scope.
+    expect((await call("POST", "/v1/sql", { ...as, token: TOKEN, body: statement })).status).toBe(
+      403,
+    );
+    expect((await call("GET", "/v1/sql/schema", { ...as, token: TOKEN })).status).toBe(403);
+
+    // Two statements in flight per principal; the third waits for neither.
+    const forever = {
+      sql: "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n) SELECT count(*) FROM n",
+    };
+    const running = [
+      call("POST", "/v1/sql", { ...as, body: forever }),
+      call("POST", "/v1/sql", { ...as, body: forever }),
+    ];
+    await Bun.sleep(50);
+    const busy = await call("POST", "/v1/sql", { ...as, body: forever });
+    expect(busy.status).toBe(429);
+    expect(busy.headers.get("retry-after")).toBe("1");
+    for (const timedOut of await Promise.all(running)) {
+      expect(timedOut).toMatchObject({ status: 400, body: { error: { code: "sql_timeout" } } });
+    }
+    await instance.close();
+
+    // A worker that dies running the statement: 500.
+    const script = join(dir, "dying-worker.ts");
+    writeFileSync(
+      script,
+      'process.stdout.write(JSON.stringify({ ready: true, pid: process.pid }) + "\\n");\nfor await (const _ of process.stdin) process.exit(3);\n',
+    );
+    const dying = sqlInstance(auth, "", [process.execPath, script]);
+    await dying.search?.catchUp();
+    expect(
+      (await call("POST", "/v1/sql", { app: appOver(dying), token: admin?.token, body: statement }))
+        .status,
+    ).toBe(500);
+    await dying.close();
+
+    // An index kept in memory has no file for the workers to read: 501.
+    const memory = testInstance({ store, storage: { url: store.url }, auth });
+    const inMemory = { app: appOver(memory), token: admin?.token };
+    expect((await call("POST", "/v1/sql", { ...inMemory, body: statement })).status).toBe(501);
+    expect((await call("GET", "/v1/sql/schema", inMemory)).status).toBe(501);
+    await memory.close();
+
+    const off = appOver(
+      testInstance({
+        store,
+        storage: { url: store.url },
+        auth,
+        config: "[search]\nenabled = false\n",
+      }),
+    );
+    expect(
+      (await call("POST", "/v1/sql", { app: off, token: admin?.token, body: statement })).status,
+    ).toBe(404);
+    expect((await call("GET", "/v1/sql/schema", { app: off, token: admin?.token })).status).toBe(
+      404,
+    );
   });
 });
 

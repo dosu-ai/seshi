@@ -190,7 +190,8 @@ def refuse(answer: Answer, offset: int = 0) -> Exception:
         return SessionRejected(code, message)
     if status == 502:
         return StoreError(message)
-    return ServerError(status, code, message)
+    at = error.get("at")
+    return ServerError(status, code, message, at if isinstance(at, int) else None)
 
 
 # --- Reading answers ------------------------------------------------------------------------
@@ -440,6 +441,14 @@ def all_changes(
 def search(request: m.SearchRequest) -> Call[m.SearchResults]:
     query: dict[str, QueryValue] = dict(request.model_dump(exclude_none=True))
     return Call("search", _model(m.SearchResults), query=query)
+
+
+def sql(request: m.SqlRequest) -> Call[m.SqlResult]:
+    return Call("sql", _model(m.SqlResult), body=request.model_dump(exclude_none=True))
+
+
+def sql_schema(since: str | None, until: str | None) -> Call[m.SqlSchema]:
+    return Call("sqlSchema", _model(m.SqlSchema), query={"since": since, "until": until})
 
 
 def search_sessions(request: m.SessionListRequest) -> Call[m.SessionList]:

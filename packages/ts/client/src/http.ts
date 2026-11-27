@@ -22,6 +22,9 @@ import {
   type SessionMetadata,
   SessionRejected,
   type SessionsPage,
+  type SqlRequest,
+  type SqlResult,
+  type SqlSchema,
   type StaleSessionsPage,
   type StoredTrace,
   StoreError,
@@ -91,6 +94,8 @@ export class ServerError extends Error {
     readonly status: number,
     readonly code: string,
     message: string,
+    /** Where a refused `sql` statement went wrong (`sql_refused`): a 0-based offset into it. */
+    readonly at?: number,
   ) {
     super(message);
     this.name = "ServerError";
@@ -121,7 +126,13 @@ export class ConfigRejected extends Error {
 }
 
 interface ErrorBody {
-  error?: { code?: string; message?: string; expected?: number; problems?: string[] };
+  error?: {
+    code?: string;
+    message?: string;
+    expected?: number;
+    problems?: string[];
+    at?: number;
+  };
 }
 
 interface RequestOptions {
@@ -213,7 +224,7 @@ function refuse(status: number, body: unknown, offset = 0): never {
   if (status === 403 && code === "excluded") throw new SessionExcluded(message);
   if (status === 422) throw new SessionRejected(code, message);
   if (status === 502) throw new StoreError(message);
-  throw new ServerError(status, code, message);
+  throw new ServerError(status, code, message, typeof error.at === "number" ? error.at : undefined);
 }
 
 /** A runtime config write's refusal: 412 and 422 as their own errors, the rest as `refuse`. */
@@ -509,6 +520,34 @@ export class HttpSeshi implements Seshi {
     });
     if (status !== 200) refuse(status, body);
     return body as SearchResults;
+  }
+
+  /** One read-only SELECT over the views `sessions`, `events` and `llm_calls`, in the server's
+   * dialect (`POST /v1/sql`; needs the `sql` scope). A statement the server refuses or cannot run
+   * is a `ServerError` with status 400 (`sql_refused` with `at`, `sql_error`, `sql_timeout`,
+   * `sql_memory`, `sql_runtime`); 429 (`sql_busy`) when its workers are busy; 501
+   * (`sql_unavailable`) when its index cannot answer `sql`; 503 while the index is built. */
+  async sql(request: SqlRequest): Promise<SqlResult> {
+    const { status, body } = await this.request("POST", "/v1/sql", {
+      body: {
+        sql: request.sql,
+        ...(request.since ? { since: request.since } : {}),
+        ...(request.until ? { until: request.until } : {}),
+        ...(request.max_rows !== undefined ? { max_rows: request.max_rows } : {}),
+      },
+    });
+    if (status !== 200) refuse(status, body);
+    return body as SqlResult;
+  }
+
+  /** What a `sql` statement may read on this server: its dialect, the views' DDL and examples
+   * (`GET /v1/sql/schema`). */
+  async sqlSchema(window: { since?: string; until?: string } = {}): Promise<SqlSchema> {
+    const { status, body } = await this.request("GET", "/v1/sql/schema", {
+      query: { since: window.since, until: window.until },
+    });
+    if (status !== 200) refuse(status, body);
+    return body as SqlSchema;
   }
 
   /** Sessions by who, where and when, with no search words (`GET /v1/search/sessions`): those

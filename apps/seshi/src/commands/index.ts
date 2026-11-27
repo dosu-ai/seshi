@@ -24,6 +24,8 @@ export interface CommandModule {
 export interface CommandSpec {
   summary: string;
   load(): Promise<CommandModule>;
+  /** Left out of `seshi --help`: a command seshi runs itself. */
+  hidden?: boolean;
 }
 
 export const COMMANDS: Readonly<Record<string, CommandSpec>> = {
@@ -115,6 +117,15 @@ export const COMMANDS: Readonly<Record<string, CommandSpec>> = {
     summary:
       "share a session with the org: this agent's session, or the one named (unshare takes it back)",
     load: () => import("./share").then((m) => ({ run: (ctx) => m.run(ctx, "share") })),
+  },
+  sql: {
+    summary: "one read-only SELECT over sessions, events and llm_calls (sql --schema)",
+    load: () => import("./sql"),
+  },
+  "sql-worker": {
+    summary: "internal: a sql worker process, started by the server or seshi sql",
+    load: () => import("./sql-worker"),
+    hidden: true,
   },
   statusline: {
     summary: "one short line for an agent's status bar",

@@ -426,6 +426,60 @@ class TestRequests:
             "until": "2026-11-14T00:00:00.000Z",
         }
 
+    def test_runs_sql_and_reads_the_rows(self) -> None:
+        answer = {
+            "now": "2026-11-25T12:00:00.000Z",
+            "scope": {"as": "ops", "role": "admin", "since": "a", "until": "b"},
+            "index": {"backend": "sqlite", "dialect": "sqlite"},
+            "columns": [{"name": "owner", "type": "TEXT"}, {"name": "n", "type": "INTEGER"}],
+            "rows": [["alice", 3]],
+            "truncated": False,
+            "elapsed_ms": 4,
+        }
+        fake = Fake({"POST /v1/sql": (200, answer)})
+        result = fake.client().sql(
+            "SELECT owner, count(*) AS n FROM sessions GROUP BY 1",
+            since=datetime(2026, 11, 1, tzinfo=timezone.utc),
+            max_rows=10,
+        )
+        assert sent(fake.last) == {
+            "sql": "SELECT owner, count(*) AS n FROM sessions GROUP BY 1",
+            "since": "2026-11-01T00:00:00.000Z",
+            "max_rows": 10,
+        }
+        assert result.scope.as_ == "ops"
+        assert [c.name for c in result.columns] == ["owner", "n"]
+        assert result.rows == [["alice", 3]]
+
+    def test_a_refused_sql_statement_says_where(self) -> None:
+        refusal = {
+            "error": {"code": "sql_refused", "message": "table meta is not allowed", "at": 14}
+        }
+        fake = Fake({"POST /v1/sql": (400, refusal)})
+        with pytest.raises(ServerError) as raised:
+            fake.client().sql("SELECT * FROM meta")
+        assert (raised.value.status, raised.value.code, raised.value.at) == (400, "sql_refused", 14)
+
+    def test_reads_the_sql_schema(self) -> None:
+        schema = {
+            "dialect": "sqlite",
+            "hint": "SQLite: …",
+            "ddl": "CREATE VIEW sessions (…);",
+            "examples": ["SELECT 1"],
+            "scope": {"as": "ops", "role": "admin", "since": "a", "until": "b"},
+            "index": {"backend": "sqlite", "dialect": "sqlite"},
+            "limits": {
+                "max_rows": 1000,
+                "max_bytes": 1048576,
+                "timeout_ms": 15000,
+                "max_sql_bytes": 16384,
+            },
+        }
+        fake = Fake({"GET /v1/sql/schema": (200, schema)})
+        got = fake.client().sql_schema(since="7d")
+        assert param(fake.last, "since") == "7d"
+        assert got.dialect == "sqlite" and got.limits.max_rows == 1000
+
     def test_searches_by_labels_each_as_key_value(self) -> None:
         results = {
             "query": "q",

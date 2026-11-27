@@ -65,12 +65,14 @@ class StoreError(SeshiError):
 
 class ServerError(SeshiError):
     """Any other answer: unauthorized (401), a bad request (400), a route that is not there
-    (404), the search index still building (503 `index_building`), an internal error."""
+    (404), the search index still building (503 `index_building`), an internal error. A `sql`
+    statement the server refused (400 `sql_refused`) carries where, as `at`: an offset into it."""
 
-    def __init__(self, status: int, code: str, message: str) -> None:
+    def __init__(self, status: int, code: str, message: str, at: int | None = None) -> None:
         super().__init__(message)
         self.status = status
         self.code = code
+        self.at = at
 
     def __repr__(self) -> str:
         return f"ServerError(status={self.status}, code={self.code!r}, message={self.message!r})"

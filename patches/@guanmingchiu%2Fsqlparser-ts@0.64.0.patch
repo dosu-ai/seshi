@@ -1,0 +1,18 @@
+diff --git a/package.json b/package.json
+index 0fc9c396feb500a780cebd8fd1a5de84b60088f7..d2b955f2621d8f1b277690234f814379d837a7c3 100644
+--- a/package.json
++++ b/package.json
+@@ -11,7 +11,12 @@
+       "types": "./dist/index.d.mts",
+       "import": "./dist/index.mjs",
+       "require": "./dist/index.cjs"
+-    }
++    },
++    "./wasm/sqlparser_rs_wasm.js": {
++      "types": "./wasm/sqlparser_rs_wasm.d.ts",
++      "import": "./wasm/sqlparser_rs_wasm.js"
++    },
++    "./wasm/sqlparser_rs_wasm_bg.wasm": "./wasm/sqlparser_rs_wasm_bg.wasm"
+   },
+   "files": [
+     "dist",

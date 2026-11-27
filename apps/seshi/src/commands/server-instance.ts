@@ -24,6 +24,7 @@ import { openStore } from "@seshi/store";
 import { EXIT } from "../cli/exit";
 import { ServeConfigError } from "../cli/failures";
 import { fail } from "../cli/output";
+import { sqlWorkerCommand } from "../cli/spawn";
 import { buildFormats } from "../integrations";
 import type { CommandContext } from "./index";
 import { configFlags, type ServeSettings, serveSettings } from "./serve-settings";
@@ -91,6 +92,7 @@ export async function openServer(
   const integrations = await ctx.integrations();
   const runtime = opened?.runtime;
   const instance = await buildInstance(loaded.config, {
+    sqlWorker: sqlWorkerCommand(),
     formats: buildFormats(integrations),
     integrations,
     env: ctx.env,

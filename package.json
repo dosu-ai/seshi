@@ -87,5 +87,8 @@
   "overrides": {
     "@huggingface/transformers": "file:./packages/ts/search/lance/no-embeddings",
     "openai": "file:./packages/ts/search/lance/no-embeddings"
+  },
+  "patchedDependencies": {
+    "@guanmingchiu/sqlparser-ts@0.64.0": "patches/@guanmingchiu%2Fsqlparser-ts@0.64.0.patch"
   }
 }

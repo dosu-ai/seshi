@@ -252,7 +252,7 @@ key with `--key`, or through the IdP ([cli.md](cli.md#signing-in-f82)).
 | Session token | The CLI, after sign-in | Read, search; delete the person's own sessions within 10 minutes of being issued. One hour; signed, not stored. An admin's (IdP group `admin_group` or an email in `admins`) can do everything |
 | Device token | The uploader on a laptop | Write the person's own sessions; read, list, export and search them (private ones too), and share or unshare them (`seshi share`), all by being their owner: it has no `sessions:read` or `search`, so it reads no one else's session, even an `org` one. 90 days; signing in again from the machine renews it |
 | Admin token | Admins | Everything, including deletes and token management |
-| Service token | A reader, or an OTLP destination | Read and search org-wide, or write as `svc:<source-id>` (and read only what it wrote there); never changes a session's visibility (its source's `visibility` decides it) |
+| Service token | A reader, or an OTLP destination | Read and search org-wide, and `sql` when created with `--scope sql`, or write as `svc:<source-id>` (and read only what it wrote there); never changes a session's visibility (its source's `visibility` decides it) |
 | Static token | Config | Everything for one owner |
 
 Every seshi token is `seshi_<id>_<secret>`, stored as a hash at `tokens/<id>.json`, revocable,
@@ -276,8 +276,10 @@ searches its own owner's sessions, private ones too, whatever its scopes. So the
 laptop uploads with (which has only `sessions:write`) reads that person's sessions, and a
 service token that only writes reads what it wrote as `svc:<source-id>`. Another owner's
 sessions need a scope that reads: `sessions:read` for the session routes, listings and change
-feeds, `search` for search. Members read their own sessions and every `org` session; admins and
-service readers read everything. Reads name another owner with `?owner=`; a session the caller
+feeds, `search` for search. `sql` (one read-only statement over the search index,
+[search.md](search.md#sql)) needs the `sql` scope, which only admins and service tokens created
+with it have. Members read their own sessions and every `org` session; admins and service
+readers read everything. Reads name another owner with `?owner=`; a session the caller
 may not read answers `404`, as if it were not there, so a credential without `sessions:read`
 gets `404` for every session not its own owner's, `org` ones included. A listing, change feed
 or search that names another owner (`GET /v1/sessions?owner=`, `GET /v1/changes?owner=`,
@@ -394,6 +396,8 @@ allow. The org key without `X-Seshi-User` gets `403` on a route it cannot use wi
 | `GET /v1/sessions/:format/:session_id/reviews?owner` | What model review decided for each stored write (F3.8; another owner's session needs `sessions:read`): the whole audit record for admins, only `n`, `at`, `content_hash` and `decision` for anyone else who may read the session |
 | `POST /otlp/v1/traces` | OTLP/HTTP trace ingest (F4): `ExportTraceServiceRequest` as protobuf or JSON from an OTLP destination's service token. Outside `/v1`, and its errors are OTLP's (`google.rpc.Status`). See [otlp.md](otlp.md) |
 | `GET /v1/search?q&owner&agent&repo&branch&source&since&until&sort&limit&matches&cursor` | Keyword search over what the caller may read (F10; [search.md](search.md)); without the `search` scope, over its own owner's sessions only (`403` for `owner=` anyone else): `{query, total, results: [{owner, format, session_id, …, score, hits, matches: [{content_hash, event_index, role, snippet, highlights}]}], cursor?, index}`. `400 bad_query`, `404 search_disabled`, `503 index_building` |
+| `POST /v1/sql` | `{sql, since?, until?, max_rows?}`: one read-only `SELECT` over the views `sessions`, `events` and `llm_calls` of the search index, in its engine's dialect ([search.md](search.md#sql)); needs the `sql` scope: `{now, scope, index, columns, rows, truncated, elapsed_ms}`. `400 sql_refused` (with `at`), `sql_error`, `sql_timeout`, `sql_memory`, `sql_runtime`; `404 search_disabled`, `429 sql_busy`, `501 sql_unavailable`, `503 index_unavailable` |
+| `GET /v1/sql/schema?since&until` | What a `sql` statement may read here: `{dialect, hint, ddl, examples, scope, index, limits}`; needs the `sql` scope |
 | `GET /v1/admin/sources?days` | Every configured source and `upload`: checkpoint, drop and failure counts, health over the last `days` (7) days, as `seshi sync status --json` prints them (`sources:admin`) |
 | `GET /v1/admin/sources/:id?days` | One source's status; `404 unknown_source` for an id no source has (`sources:admin`) |
 | `GET /v1/admin/sources/:id/failed`, `…/dropped` `?since&after&limit` | A source's failure or drop records, oldest first, as `seshi sync failed\|dropped --json` prints them; never content. A source no longer configured can still have its records read (`sources:admin`, X6.4) |

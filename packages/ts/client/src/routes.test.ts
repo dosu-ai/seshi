@@ -269,3 +269,43 @@ describe("the runtime config calls", () => {
     await expect(db.deleteConfigFile("packs/x.json")).rejects.toMatchObject({ status: 404 });
   });
 });
+
+describe("sql (docs/seshi/session-tools.md)", () => {
+  it("posts the statement and its window, and reads the rows", async () => {
+    const answer = {
+      now: "2026-11-25T12:00:00.000Z",
+      scope: { as: "ops", role: "admin", since: "a", until: "b" },
+      index: { backend: "sqlite", dialect: "sqlite" },
+      columns: [{ name: "n", type: "INTEGER" }],
+      rows: [[3]],
+      truncated: false,
+      elapsed_ms: 2,
+    };
+    const { db, seen } = routed({ "POST /v1/sql": [200, answer] });
+    expect(await db.sql({ sql: "SELECT count(*) AS n FROM sessions", since: "7d" })).toEqual(
+      answer,
+    );
+    expect(sent(seen[0])).toEqual({ sql: "SELECT count(*) AS n FROM sessions", since: "7d" });
+  });
+
+  it("carries where a refused statement went wrong", async () => {
+    const { db } = routed({
+      "POST /v1/sql": [
+        400,
+        { error: { code: "sql_refused", message: "table meta is not allowed", at: 14 } },
+      ],
+    });
+    await expect(db.sql({ sql: "SELECT * FROM meta" })).rejects.toMatchObject({
+      status: 400,
+      code: "sql_refused",
+      at: 14,
+    });
+  });
+
+  it("reads the schema with the window as query parameters", async () => {
+    const { db, seen } = routed({ "GET /v1/sql/schema": [200, { dialect: "sqlite" }] });
+    expect(await db.sqlSchema({ since: "7d" })).toEqual({ dialect: "sqlite" });
+    expect(param(seen[0], "since")).toBe("7d");
+    expect(param(seen[0], "until")).toBeNull();
+  });
+});

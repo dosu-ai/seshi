@@ -25,6 +25,15 @@ def _time(value: str | datetime | None) -> str | None:
     return calls.rfc3339(value) if isinstance(value, datetime) else value
 
 
+def _sql_request(
+    statement: str,
+    since: str | datetime | None,
+    until: str | datetime | None,
+    max_rows: int | None,
+) -> m.SqlRequest:
+    return m.SqlRequest(sql=statement, since=_time(since), until=_time(until), max_rows=max_rows)
+
+
 def _search_request(
     q: str,
     *,
@@ -568,6 +577,30 @@ class SeshiClient(_Base):
             if not page.truncated or page.cursor is None:
                 return
             after = page.cursor
+
+    # --- SQL ------------------------------------------------------------------------------
+
+    def sql(
+        self,
+        statement: str,
+        *,
+        since: str | datetime | None = None,
+        until: str | datetime | None = None,
+        max_rows: int | None = None,
+    ) -> m.SqlResult:
+        """`POST /v1/sql`: one read-only SELECT over `sessions`, `events` and `llm_calls`, in the
+        server's dialect (`sql_schema().dialect`). Needs the `sql` scope. A statement the server
+        refuses is `ServerError` 400 `sql_refused` (with `at`); `sql_error`, `sql_timeout`,
+        `sql_memory` and `sql_runtime` when it cannot run it; 429 `sql_busy`; 501
+        `sql_unavailable` when its index cannot answer `sql`."""
+        return self._run(calls.sql(_sql_request(statement, since, until, max_rows)))
+
+    def sql_schema(
+        self, *, since: str | datetime | None = None, until: str | datetime | None = None
+    ) -> m.SqlSchema:
+        """`GET /v1/sql/schema`: the dialect, the views' DDL and examples, and the scope a
+        statement would be answered under."""
+        return self._run(calls.sql_schema(_time(since), _time(until)))
 
     # --- Search ---------------------------------------------------------------------------
 
@@ -1183,6 +1216,23 @@ class AsyncSeshiClient(_Base):
             if not page.truncated or page.cursor is None:
                 return
             after = page.cursor
+
+    async def sql(
+        self,
+        statement: str,
+        *,
+        since: str | datetime | None = None,
+        until: str | datetime | None = None,
+        max_rows: int | None = None,
+    ) -> m.SqlResult:
+        """`SeshiClient.sql`, awaited."""
+        return await self._run(calls.sql(_sql_request(statement, since, until, max_rows)))
+
+    async def sql_schema(
+        self, *, since: str | datetime | None = None, until: str | datetime | None = None
+    ) -> m.SqlSchema:
+        """`SeshiClient.sql_schema`, awaited."""
+        return await self._run(calls.sql_schema(_time(since), _time(until)))
 
     async def search(
         self,

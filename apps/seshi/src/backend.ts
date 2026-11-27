@@ -21,6 +21,9 @@ import {
   type SessionListRequest,
   type SessionMetadata,
   type SessionsPage,
+  type SqlRequest,
+  type SqlResult,
+  type SqlSchema,
   type StoredTrace,
   type Visibility,
 } from "@seshi/model";
@@ -30,6 +33,7 @@ import {
   readSessionEvents,
   type SearchService,
   SessionReadError,
+  type SqlCaller,
   TraceCache,
   type Viewer,
   viewerFor,
@@ -136,6 +140,10 @@ export interface Backend {
     options?: OwnerOption,
   ): Promise<ReviewDecision[] | null>;
   search(request: SearchRequest, hooks?: SearchHooks): Promise<SearchResults>;
+  /** One read-only SELECT over the index's views: the server's `POST /v1/sql`, or a local
+   * worker over a serverless laptop's own index. */
+  sql(request: SqlRequest, hooks?: SearchHooks): Promise<SqlResult>;
+  sqlSchema(window?: { since?: string; until?: string }, hooks?: SearchHooks): Promise<SqlSchema>;
   /** Sessions by who, where and when, from the search index (`list_sessions`). */
   searchSessions(request: SessionListRequest, hooks?: SearchHooks): Promise<SessionList>;
   /** Part of a session's events (`read_session`). */
@@ -188,6 +196,12 @@ export class ServerBackend implements Backend {
   }
   search(request: SearchRequest): Promise<SearchResults> {
     return this.db.search(request);
+  }
+  sql(request: SqlRequest): Promise<SqlResult> {
+    return this.db.sql(request);
+  }
+  sqlSchema(window: { since?: string; until?: string } = {}): Promise<SqlSchema> {
+    return this.db.sqlSchema(window);
   }
   searchSessions(request: SessionListRequest): Promise<SessionList> {
     return this.db.searchSessions(request);
@@ -366,7 +380,7 @@ export class ServerlessBackend implements Backend {
     );
     return records as ReviewDecision[];
   }
-  /** The local index, caught up when it has not been lately. */
+  /** The laptop's own index, caught up unless it caught up within two indexer intervals. */
   private async index(hooks: SearchHooks): Promise<SearchService> {
     const search = this.instance.search;
     if (!search) {
@@ -417,6 +431,39 @@ export class ServerlessBackend implements Backend {
         cache: this.traceCache,
       }),
     );
+  }
+
+  /** `sql` over the laptop's own index (T11), with the visibility rule `search` follows: the
+   * user's own sessions and the org's, owner-only ones too with `--include-private`. */
+  private sqlCaller(): SqlCaller {
+    return { viewer: this.viewer(), as: this.owner, role: "local", key: this.owner };
+  }
+
+  private localSql() {
+    const sql = this.instance.sql;
+    if (!sql) {
+      throw new Refused(
+        EXIT.config,
+        "search_disabled",
+        "sql reads the search index, which is off on this machine: set [search] enabled = true in the CLI config",
+      );
+    }
+    return sql;
+  }
+
+  async sql(request: SqlRequest, hooks: SearchHooks = {}): Promise<SqlResult> {
+    const sql = this.localSql();
+    await this.index(hooks);
+    return sql.query(this.sqlCaller(), request);
+  }
+
+  async sqlSchema(
+    window: { since?: string; until?: string } = {},
+    hooks: SearchHooks = {},
+  ): Promise<SqlSchema> {
+    const sql = this.localSql();
+    await this.index(hooks);
+    return sql.schema(this.sqlCaller(), window);
   }
   private noTokens(): never {
     throw new Refused(

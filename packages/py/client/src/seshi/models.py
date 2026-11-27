@@ -2,9 +2,10 @@
 in `spec/schemas/` define them.
 
 Field names are the JSON names, except `schema` (which would shadow pydantic's own attribute),
-written `schema_`, and OTLP's camelCase names, written in snake_case; both are read and written
-under their JSON names. Times are kept as the RFC 3339 strings the server writes
-(`2026-11-14T09:00:00.000Z`), so a cursor or a stamp round-trips byte for byte.
+written `schema_`, `as` (a Python keyword), written `as_`, and OTLP's camelCase names, written
+in snake_case; all are read and written under their JSON names. Times are kept as the RFC 3339
+strings the server writes (`2026-11-14T09:00:00.000Z`), so a cursor or a stamp round-trips byte
+for byte.
 
 Response models keep fields they do not know (`extra="allow"`), and an enum value they do not
 know (`Open`), so a newer server's additions do not break an older client; request models
@@ -47,7 +48,13 @@ Visibility = Literal["org", "owner"]
 """`org`: every member reads it. `owner`: only its owner (admins and services read everything)."""
 
 Scope = Literal[
-    "sessions:write", "sessions:read", "sessions:delete", "search", "sources:admin", "tokens:admin"
+    "sessions:write",
+    "sessions:read",
+    "sessions:delete",
+    "search",
+    "sources:admin",
+    "tokens:admin",
+    "sql",
 ]
 TokenKind = Literal["org", "admin", "device", "service"]
 OwnerBasis = Literal["verified", "claimed", "service"]
@@ -1001,6 +1008,79 @@ class SearchResults(Response):
     cursor: str | None = None
     """Pass as `cursor` for the next page; absent on the last."""
     index: SearchIndexState
+
+
+# --- SQL (docs/seshi/session-tools.md) -------------------------------------------------------
+
+SqlDialect = Literal["sqlite", "duckdb"]
+
+
+class SqlRequest(Request):
+    """One read-only SELECT over the views `sessions`, `events` and `llm_calls`."""
+
+    sql: str
+    """At most 16 KiB, in the server's dialect (`SqlSchema.dialect`)."""
+    since: str | None = None
+    """The window's start: an RFC 3339 time or an age (`30d`); 30 days before `until` by default."""
+    until: str | None = None
+    """The window's end; now by default. At most 400 days after `since`."""
+    max_rows: int | None = None
+    """Rows to return at most; the server's `search.sql.max_rows` (1,000) caps it."""
+
+
+class SqlScope(Response):
+    as_: str = Field(alias="as")
+    """The owner the statement was answered as."""
+    role: str
+    """`admin`, `service` or `member`; `local` on a serverless laptop's own index."""
+    since: str
+    until: str
+
+
+class SqlIndexInfo(Response):
+    backend: Literal["sqlite", "lance"]
+    dialect: SqlDialect
+    generation: str | None = None
+    updated_at: str | None = None
+    """When the index last caught up with the change feed."""
+
+
+class SqlColumn(Response):
+    name: str
+    type: str
+
+
+class SqlResult(Response):
+    now: str
+    scope: SqlScope
+    index: SqlIndexInfo
+    columns: list[SqlColumn]
+    rows: list[list[Any]]
+    """One list per row, in the order of `columns`; a blob as hex."""
+    truncated: bool
+    """It stopped at `max_rows` or 1 MB of rows: add LIMIT or aggregate."""
+    elapsed_ms: int
+
+
+class SqlLimits(Response):
+    max_rows: int
+    max_bytes: int
+    timeout_ms: int
+    max_sql_bytes: int
+
+
+class SqlSchema(Response):
+    """What a statement may read on this server, in its dialect."""
+
+    dialect: SqlDialect
+    hint: str
+    """How to write the dialect, in one line."""
+    ddl: str
+    """The views' `CREATE VIEW`, with each column's type and comment."""
+    examples: list[str]
+    scope: SqlScope
+    index: SqlIndexInfo
+    limits: SqlLimits
 
 
 class SessionListRequest(Request):

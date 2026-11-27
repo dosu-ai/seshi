@@ -12,6 +12,7 @@
     }
   },
   "dependencies": {
+    "@guanmingchiu/sqlparser-ts": "0.64.0",
     "@seshi/auth": "workspace:*",
     "@seshi/model": "workspace:*",
     "@seshi/store": "workspace:*"

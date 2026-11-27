@@ -98,6 +98,7 @@ export {
   MATCH_START,
   MAX_INDEXED_CHARS,
 } from "./snippet";
+export * from "./sql/index";
 export {
   fts5Match,
   INDEX_SCHEMA,

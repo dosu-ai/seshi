@@ -23,6 +23,7 @@ WORKDIR /src
 # Every workspace's package.json has to be present for a frozen install, so the workspaces are
 # copied whole (.dockerignore leaves out tests, testdata and node_modules).
 COPY package.json bun.lock ./
+COPY patches ./patches
 COPY apps ./apps
 COPY packages ./packages
 COPY integrations ./integrations
