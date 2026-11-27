@@ -24,6 +24,8 @@ import type {
   IndexStore,
   OpenIndex,
   Removal,
+  SessionListQuery,
+  SessionPosition,
   SessionUpdate,
 } from "@seshi/search";
 import {
@@ -554,6 +556,149 @@ describe.each(BACKENDS)("the search index on $name", (backend) => {
         }
       }
       expect(await names(index, "hostile", { owners: ["x' OR '1'='1"] })).toEqual([]);
+    });
+
+    describe("listing sessions without words (list_sessions)", () => {
+      const list = (index: IndexStore, extra: Partial<SessionListQuery> = {}) =>
+        index.listSessions({ viewer: LOCAL_VIEWER, limit: 20, ...extra });
+      const listed = async (index: IndexStore, extra: Partial<SessionListQuery> = {}) =>
+        (await list(index, extra)).sessions.map((s) => s.session_id);
+      const at = (iso: string) => Date.parse(iso);
+
+      it("lists every session, newest first, with its fields, and never a removed one", async () => {
+        const index = await open();
+        const full = session(1, {
+          repo: "github.com/acme/app",
+          branch: "main",
+          models: ["claude-opus-5-5"],
+          labels: { team: "core" },
+          started_at: at("2026-11-14T08:00:00.000Z"),
+          ended_at: at("2026-11-14T08:30:00.000Z"),
+          updated_at: "2026-11-14T08:30:00.000Z",
+        });
+        await indexed(
+          index,
+          { session: full, events: [event("a")], replace: true, read_at: 1 },
+          replace(2, ["b"], { updated_at: "2026-11-15T09:00:00.000Z" }),
+          replace(3, ["c"], { updated_at: "2026-11-13T09:00:00.000Z" }),
+          // No events with text: listed all the same.
+          replace(4, [], { updated_at: "2026-11-12T09:00:00.000Z" }),
+        );
+        expect(await listed(index)).toEqual(["s2", "s1", "s3", "s4"]);
+        expect((await list(index)).sessions[1]).toEqual(full);
+        await page(index, [], [{ archive: H(2), read_at: 5, scrub: false }]);
+        expect(await listed(index)).toEqual(["s1", "s3", "s4"]);
+      });
+
+      it("pages newest first with no session given twice, ties broken by key", async () => {
+        const index = await open();
+        const same = "2026-11-14T09:00:00.000Z";
+        await indexed(
+          index,
+          ...[1, 2, 3, 4, 5].map((n) => replace(n, ["x"], { updated_at: same })),
+          replace(6, ["x"], { owner: "bob", updated_at: same }),
+          replace(7, ["x"], { updated_at: "2026-11-15T09:00:00.000Z" }),
+        );
+        const seen: string[] = [];
+        let after: SessionPosition | undefined;
+        for (let i = 0; i < 10; i++) {
+          const got = await list(index, { limit: 2, ...(after ? { after } : {}) });
+          seen.push(...got.sessions.map((s) => `${s.owner}/${s.session_id}`));
+          const last = got.sessions.at(-1);
+          if (!got.more || last === undefined) break;
+          after = { updated: Date.parse(last.updated_at), key: `${last.owner}/${last.archive_id}` };
+        }
+        expect(seen).toEqual([
+          "alice/s7",
+          "bob/s6",
+          "alice/s5",
+          "alice/s4",
+          "alice/s3",
+          "alice/s2",
+          "alice/s1",
+        ]);
+      });
+
+      it("lists the sessions that overlap the window", async () => {
+        const index = await open();
+        await indexed(
+          index,
+          // 08:00–10:00 on the 14th.
+          replace(1, ["x"], {
+            started_at: at("2026-11-14T08:00:00.000Z"),
+            ended_at: at("2026-11-14T10:00:00.000Z"),
+            updated_at: "2026-11-14T10:00:00.000Z",
+          }),
+          // No event times: its last update stands for both ends.
+          replace(2, ["x"], { updated_at: "2026-11-16T09:00:00.000Z" }),
+          // Started, not ended.
+          replace(3, ["x"], {
+            started_at: at("2026-11-10T08:00:00.000Z"),
+            updated_at: "2026-11-11T09:00:00.000Z",
+          }),
+        );
+        const window = (since: string, until?: string) =>
+          listed(index, { since: at(since), ...(until ? { until: at(until) } : {}) });
+        expect(await window("2026-11-14T09:00:00.000Z", "2026-11-14T09:30:00.000Z")).toEqual([
+          "s1",
+        ]);
+        expect(await window("2026-11-14T10:00:00.000Z")).toEqual(["s2", "s1"]);
+        expect(await window("2026-11-14T10:00:01.000Z")).toEqual(["s2"]);
+        expect(await window("2026-11-01T00:00:00.000Z", "2026-11-14T07:59:59.000Z")).toEqual([
+          "s3",
+        ]);
+        expect(await window("2026-11-11T09:00:00.000Z", "2026-11-11T09:00:00.000Z")).toEqual([
+          "s3",
+        ]);
+      });
+
+      it("shows a viewer only what it may see, and filters as search does", async () => {
+        const index = await open();
+        await indexed(
+          index,
+          replace(1, ["x"], {
+            repo: "github.com/acme/app",
+            branch: "main",
+            harness: "claude-code",
+            agent_version: "2.1.0",
+            models: ["claude-opus-5-5", "claude-haiku-5-5"],
+            labels: { team: "core", "dosu.project": "app" },
+            source_id: "upload",
+          }),
+          replace(2, ["x"], {
+            visibility: "owner",
+            format: "vcs:checkout",
+            origin_agent: "codex",
+            repo: "gitlab.com/other/APP",
+            labels: { team: "core" },
+          }),
+          replace(3, ["x"], { owner: "bob", labels: { note: 'a "quoted": "x" 50%_\\' } }),
+          replace(4, ["x"], { owner: "bob", visibility: "owner" }),
+        );
+        const sorted = async (extra: Partial<SessionListQuery>) =>
+          (await listed(index, extra)).sort();
+        expect(await sorted({ viewer: member("alice") })).toEqual(["s1", "s2", "s3"]);
+        expect(await sorted({ viewer: member("carol") })).toEqual(["s1", "s3"]);
+        expect(await sorted({ viewer: { ...member("bob"), ownOnly: true } })).toEqual(["s3", "s4"]);
+        expect(await sorted({ viewer: { ...member("x"), own: [], ownOnly: true } })).toEqual([]);
+        expect(await sorted({ owners: ["bob"] })).toEqual(["s3", "s4"]);
+        expect(await sorted({ owners: [] })).toEqual([]);
+        expect(await sorted({ agent: "codex" })).toEqual(["s2"]);
+        expect(await sorted({ repo: "app" })).toEqual(["s1", "s2"]);
+        expect(await sorted({ repo: "acme/app" })).toEqual(["s1"]);
+        expect(await sorted({ branch: "main" })).toEqual(["s1"]);
+        expect(await sorted({ harness: "claude-code" })).toEqual(["s1"]);
+        expect(await sorted({ agent_version: "2.1.0" })).toEqual(["s1"]);
+        expect(await sorted({ model: "claude-haiku-5-5" })).toEqual(["s1"]);
+        expect(await sorted({ source: "upload" })).toEqual(["s1"]);
+        expect(await sorted({ labels: { team: "core" } })).toEqual(["s1", "s2"]);
+        expect(await sorted({ labels: { team: "core", "dosu.project": "app" } })).toEqual(["s1"]);
+        expect(await sorted({ labels: { team: "cor" } })).toEqual([]);
+        expect(await sorted({ labels: { note: 'a "quoted": "x" 50%_\\' } })).toEqual(["s3"]);
+        expect(await sorted({ labels: { note: "a" } })).toEqual([]);
+        expect(await sorted({ labels: { quoted: "x" } })).toEqual([]);
+        expect(await sorted({ owners: ["x' OR '1'='1"] })).toEqual([]);
+      });
     });
 
     it("finds phrases, words split by punctuation, and either word of an OR", async () => {

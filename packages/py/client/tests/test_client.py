@@ -133,6 +133,74 @@ CONFIG = {
     "restart_only_sections": ["server"],
 }
 
+SUMMARY = {
+    "owner": "bob",
+    "format": "claude-code",
+    "session_id": "s",
+    "archive_id": SHA,
+    "repo": "github.com/acme/widget",
+    "visibility": "org",
+    "updated_at": "2026-11-14T09:00:00.000Z",
+}
+SESSION_LIST = {
+    "sessions": [SUMMARY],
+    "window": {"since": "2026-11-07T09:00:00.000Z", "until": "2026-11-14T09:00:00.000Z"},
+    "cursor": "c2",
+    "index": {"ready_at": "t", "sessions": 1},
+}
+TOKENS = dict.fromkeys(
+    [
+        "input_tokens",
+        "output_tokens",
+        "cache_read_input_tokens",
+        "cache_creation_input_tokens",
+        "reasoning_tokens",
+        "total_tokens",
+    ],
+    0,
+)
+EVENTS: dict[str, Any] = {
+    "session": {
+        "owner": "bob",
+        "archive_id": SHA,
+        "format": "claude-code",
+        "session_id": "s",
+        "visibility": "org",
+        "updated_at": "2026-11-14T09:00:00.000Z",
+        "head": SHA,
+        "traces": 1,
+        "events": 40,
+        "models": ["claude-opus-4"],
+        "llm_calls": 3,
+        "tokens": {**TOKENS, "total_tokens": 1200},
+    },
+    "mode": "condensed",
+    "from": 10,
+    "to": 12,
+    "events": [
+        {
+            "seq": 10,
+            "role": "user",
+            "content_hash": SHA,
+            "event_index": 10,
+            "text": "hi",
+            "chars": 2,
+        },
+        {
+            "seq": 11,
+            "role": "tool_result",
+            "content_hash": SHA,
+            "event_index": 11,
+            "tool_call_id": "c1",
+            "ok": True,
+            "text": "ok",
+            "chars": 900,
+            "cut": 898,
+        },
+    ],
+    "next": 12,
+}
+
 
 def error(code: str, message: str = "no", **extra: Any) -> dict[str, Any]:
     return {"error": {"code": code, "message": message, **extra}}
@@ -411,6 +479,110 @@ class TestRequests:
         assert sent(fake.last)["labels"] == labels
 
 
+class TestSessionReads:
+    def test_lists_sessions_by_who_where_and_when(self) -> None:
+        fake = Fake({"GET /v1/search/sessions": (200, SESSION_LIST)})
+        page = fake.client().search_sessions(
+            owner="bob",
+            repo="widget",
+            labels={"team": "platform", "env": "ci"},
+            since="7d",
+            until=datetime(2026, 11, 14, tzinfo=timezone.utc),
+            limit=5,
+            after="c1",
+        )
+        params = fake.last.url.params
+        assert params.get_list("label") == ["team=platform", "env=ci"]
+        assert {k: v for k, v in params.multi_items() if k != "label"} == {
+            "owner": "bob",
+            "repo": "widget",
+            "since": "7d",
+            "until": "2026-11-14T00:00:00.000Z",
+            "limit": "5",
+            "after": "c1",
+        }
+        assert page.sessions[0].repo == "github.com/acme/widget"
+        assert page.window.until == "2026-11-14T09:00:00.000Z"
+        assert (page.cursor, page.index.sessions) == ("c2", 1)
+
+    def test_lists_sessions_with_no_filters(self) -> None:
+        fake = Fake({"GET /v1/search/sessions": (200, {**SESSION_LIST, "cursor": None})})
+        page = fake.client().search_sessions()
+        assert fake.last.url.query == b""
+        assert page.cursor is None
+
+    def test_reads_a_sessions_events_with_every_parameter(self) -> None:
+        fake = Fake({"GET /v1/sessions/claude-code/s%2F1/events": (200, EVENTS)})
+        answer = fake.client().session_events(
+            "claude-code",
+            "s/1",
+            owner="bob",
+            from_=10,
+            to=12,
+            mode="full",
+            roles=["user", "tool_result"],
+            max_chars=2000,
+            trace=SHA[:8],
+            head=SHA,
+        )
+        assert dict(fake.last.url.params) == {
+            "owner": "bob",
+            "from": "10",
+            "to": "12",
+            "mode": "full",
+            "roles": "user,tool_result",
+            "max_chars": "2000",
+            "trace": SHA[:8],
+            "head": SHA,
+        }
+        assert (answer.from_, answer.to, answer.next, answer.next_offset) == (10, 12, 12, None)
+        assert answer.session.tokens.total_tokens == 1200
+        assert answer.session.models == ["claude-opus-4"]
+        user, result = answer.events
+        assert (user.seq, user.role, user.text) == (10, "user", "hi")
+        assert (result.ok, result.chars, result.cut) == (True, 900, 898)
+
+    def test_reads_events_around_one_by_owner_and_archive_id(self) -> None:
+        fake = Fake({f"GET /v1/owners/bob/sessions/{SHA}/events": (200, EVENTS)})
+        answer = fake.client().session_events_by_archive("bob", SHA, around=11, context=1)
+        assert dict(fake.last.url.params) == {"around": "11", "context": "1"}
+        assert answer.session.archive_id == SHA
+
+    def test_reads_one_events_text_in_pieces(self) -> None:
+        piece = {**EVENTS, "events": [{**EVENTS["events"][1], "offset": 100}], "next_offset": 200}
+        fake = Fake({"GET /v1/sessions/claude-code/s/events": (200, piece)})
+        answer = fake.client().session_events("claude-code", "s", event=11, offset=100)
+        assert dict(fake.last.url.params) == {"event": "11", "offset": "100"}
+        assert (answer.events[0].offset, answer.next_offset) == (100, 200)
+
+    @pytest.mark.parametrize(
+        ("status", "code"),
+        [(404, "not_found"), (410, "redacted"), (409, "head_changed"), (400, "bad_query")],
+    )
+    def test_refuses_every_events_read_that_is_not_200(self, status: int, code: str) -> None:
+        fake = Fake(
+            {
+                "GET /v1/sessions/claude-code/s/events": (status, error(code)),
+                f"GET /v1/owners/bob/sessions/{SHA}/events": (status, error(code)),
+            }
+        )
+        db = fake.client()
+        reads: list[Callable[[], object]] = [
+            lambda: db.session_events("claude-code", "s", head=SHA),
+            lambda: db.session_events_by_archive("bob", SHA),
+        ]
+        for read in reads:
+            with pytest.raises(ServerError) as raised:
+                read()
+            assert (raised.value.status, raised.value.code) == (status, code)
+
+    def test_refuses_a_session_list_the_server_cannot_run(self) -> None:
+        fake = Fake({"GET /v1/search/sessions": (400, error("bad_query"))})
+        with pytest.raises(ServerError) as raised:
+            fake.client().search_sessions(since="yesterday")
+        assert (raised.value.status, raised.value.code) == (400, "bad_query")
+
+
 class TestRefusals:
     @pytest.mark.parametrize(
         ("status", "body", "kind", "attrs"),
@@ -631,6 +803,9 @@ async def test_the_async_client_makes_the_same_calls() -> None:
                 200,
                 {"entries": [{"key": "k1", "entry": CHANGE}], "truncated": False},
             ),
+            "GET /v1/search/sessions": (200, SESSION_LIST),
+            f"GET /v1/owners/bob/sessions/{SHA}/events": (200, EVENTS),
+            "GET /v1/sessions/claude-code/s/events": (410, error("redacted")),
         }
     )
 
@@ -647,6 +822,14 @@ async def test_the_async_client_makes_the_same_calls() -> None:
         meta = await db.get_session("claude-code", "s")
         assert meta is not None and meta.session_id == "s"
         assert [c.key async for c in db.iter_changes()] == ["k1"]
+        page = await db.search_sessions(labels={"team": "platform"})
+        assert page.sessions[0].session_id == "s"
+        events = await db.session_events_by_archive("bob", SHA, roles=["user"])
+        assert events.from_ == 10
+        assert param(fake.last, "roles") == "user"
+        with pytest.raises(ServerError) as gone:
+            await db.session_events("claude-code", "s")
+        assert gone.value.status == 410
     assert fake.seen[0].headers["x-seshi-user"] == "alice"
     assert fake.seen[0].headers["user-agent"] == f"seshi-python/{__version__}"
 

@@ -17,6 +17,8 @@ import type {
   IndexStore,
   OpenIndex,
   PageCommit,
+  SessionListPage,
+  SessionListQuery,
   SessionUpdate,
 } from "./backend";
 import { MEMORY_INDEX, tryRestrictToOwner } from "./paths";
@@ -182,6 +184,66 @@ export function snippetsSql(n: number): string {
       snippet(events_text, 0, ?, ?, '…', ${SNIPPET_TOKENS}) AS marked
     FROM events_text JOIN events e ON e.id = events_text.rowid
     WHERE events_text MATCH ? AND events_text.rowid+0 IN (${placeholders(n)})`;
+}
+
+/** Add the session filters every read shares (who may see it, and the session's fields) to
+ * `where`, over `sessions` as `s`. False when nothing can match: no owners, or an own-only viewer
+ * who owns nothing. */
+function sessionFilters(
+  q: Omit<SessionListQuery, "limit" | "after" | "since" | "until">,
+  where: string[],
+  params: SQLQueryBindings[],
+): boolean {
+  if (q.viewer.ownOnly) {
+    if (q.viewer.own.length === 0) return false;
+    where.push(`s.owner IN (${placeholders(q.viewer.own.length)})`);
+    params.push(...q.viewer.own);
+  } else if (!q.viewer.everything) {
+    if (q.viewer.own.length > 0) {
+      where.push(`(s.visibility = 'org' OR s.owner IN (${placeholders(q.viewer.own.length)}))`);
+      params.push(...q.viewer.own);
+    } else {
+      where.push("s.visibility = 'org'");
+    }
+  }
+  if (q.owners !== undefined) {
+    if (q.owners.length === 0) return false;
+    where.push(`s.owner IN (${placeholders(q.owners.length)})`);
+    params.push(...q.owners);
+  }
+  if (q.agent !== undefined) {
+    where.push("(s.format = ? OR s.origin_agent = ?)");
+    params.push(q.agent, q.agent);
+  }
+  if (q.repo !== undefined) {
+    where.push("(s.repo = ? COLLATE NOCASE OR s.repo LIKE ? ESCAPE '\\')");
+    params.push(q.repo, `%/${likeLiteral(q.repo)}`);
+  }
+  if (q.branch !== undefined) {
+    where.push("s.branch = ?");
+    params.push(q.branch);
+  }
+  if (q.harness !== undefined) {
+    where.push("s.harness = ?");
+    params.push(q.harness);
+  }
+  if (q.agent_version !== undefined) {
+    where.push("s.agent_version = ?");
+    params.push(q.agent_version);
+  }
+  if (q.model !== undefined) {
+    where.push("EXISTS (SELECT 1 FROM json_each(s.models) WHERE json_each.value = ?)");
+    params.push(q.model);
+  }
+  for (const [key, value] of Object.entries(q.labels ?? {})) {
+    where.push("EXISTS (SELECT 1 FROM json_each(s.labels) AS l WHERE l.key = ? AND l.value = ?)");
+    params.push(key, value);
+  }
+  if (q.source !== undefined) {
+    where.push("s.source_id = ?");
+    params.push(q.source);
+  }
+  return true;
 }
 
 export interface SqliteIndexOptions extends IndexOptions {
@@ -397,55 +459,7 @@ export class SqliteIndex implements IndexStore {
     const match = fts5Match(q.match);
     const where: string[] = ["events_text MATCH ?", "s.removed = 0"];
     const params: SQLQueryBindings[] = [match];
-    if (q.viewer.ownOnly) {
-      if (q.viewer.own.length === 0) return { total: 0, hits: [] };
-      where.push(`s.owner IN (${placeholders(q.viewer.own.length)})`);
-      params.push(...q.viewer.own);
-    } else if (!q.viewer.everything) {
-      if (q.viewer.own.length > 0) {
-        where.push(`(s.visibility = 'org' OR s.owner IN (${placeholders(q.viewer.own.length)}))`);
-        params.push(...q.viewer.own);
-      } else {
-        where.push("s.visibility = 'org'");
-      }
-    }
-    if (q.owners !== undefined) {
-      if (q.owners.length === 0) return { total: 0, hits: [] };
-      where.push(`s.owner IN (${placeholders(q.owners.length)})`);
-      params.push(...q.owners);
-    }
-    if (q.agent !== undefined) {
-      where.push("(s.format = ? OR s.origin_agent = ?)");
-      params.push(q.agent, q.agent);
-    }
-    if (q.repo !== undefined) {
-      where.push("(s.repo = ? COLLATE NOCASE OR s.repo LIKE ? ESCAPE '\\')");
-      params.push(q.repo, `%/${likeLiteral(q.repo)}`);
-    }
-    if (q.branch !== undefined) {
-      where.push("s.branch = ?");
-      params.push(q.branch);
-    }
-    if (q.harness !== undefined) {
-      where.push("s.harness = ?");
-      params.push(q.harness);
-    }
-    if (q.agent_version !== undefined) {
-      where.push("s.agent_version = ?");
-      params.push(q.agent_version);
-    }
-    if (q.model !== undefined) {
-      where.push("EXISTS (SELECT 1 FROM json_each(s.models) WHERE json_each.value = ?)");
-      params.push(q.model);
-    }
-    for (const [key, value] of Object.entries(q.labels ?? {})) {
-      where.push("EXISTS (SELECT 1 FROM json_each(s.labels) AS l WHERE l.key = ? AND l.value = ?)");
-      params.push(key, value);
-    }
-    if (q.source !== undefined) {
-      where.push("s.source_id = ?");
-      params.push(q.source);
-    }
+    if (!sessionFilters(q, where, params)) return { total: 0, hits: [] };
     if (q.since !== undefined) {
       where.push("coalesce(e.ts, s.updated_ms) >= ?");
       params.push(q.since);
@@ -500,6 +514,34 @@ export class SqliteIndex implements IndexStore {
       matches: matches.get(row.id) ?? [],
     }));
     return { total, hits };
+  }
+
+  async listSessions(q: SessionListQuery): Promise<SessionListPage> {
+    const where: string[] = ["s.removed = 0"];
+    const params: SQLQueryBindings[] = [];
+    if (!sessionFilters(q, where, params)) return { sessions: [], more: false };
+    if (q.since !== undefined) {
+      where.push("coalesce(s.ended_at, s.updated_ms) >= ?");
+      params.push(q.since);
+    }
+    if (q.until !== undefined) {
+      where.push("coalesce(s.started_at, s.updated_ms) <= ?");
+      params.push(q.until);
+    }
+    if (q.after !== undefined) {
+      where.push("(s.updated_ms < ? OR (s.updated_ms = ? AND s.owner || '/' || s.archive_id < ?))");
+      params.push(q.after.updated, q.after.updated, q.after.key);
+    }
+    const rows = this.db
+      .query(
+        `SELECT s.* FROM sessions s WHERE ${where.join(" AND ")}
+         ORDER BY s.updated_ms DESC, s.owner || '/' || s.archive_id DESC LIMIT ?`,
+      )
+      .all(...params, q.limit + 1) as SessionRow[];
+    return {
+      sessions: rows.slice(0, q.limit).map(sessionOf),
+      more: rows.length > q.limit,
+    };
   }
 
   /** The best `limit` matching events of each session, with snippets. FTS5 refuses

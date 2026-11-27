@@ -66,8 +66,8 @@ export interface SearchMatch {
   highlights: [number, number][];
 }
 
-/** A session with records that match. */
-export interface SearchResult {
+/** A session as the search index holds it: who, where and when. */
+export interface SessionSummary {
   owner: string;
   /** The format the session is filed under. */
   format: string;
@@ -90,6 +90,10 @@ export interface SearchResult {
   started_at?: string;
   ended_at?: string;
   updated_at: string;
+}
+
+/** A session with records that match. */
+export interface SearchResult extends SessionSummary {
   /** How well the session matched: higher is better, comparable within one answer only. */
   score: number;
   /** How many of its records matched. */
@@ -117,6 +121,42 @@ export interface SearchResults {
   capped?: true;
   results: SearchResult[];
   /** Pass as `cursor` for the next page; absent on the last. */
+  cursor?: string;
+  index: SearchIndexState;
+}
+
+/** Sessions by who, where and when, with no search words (`GET /v1/search/sessions`): those
+ * the caller may read, newest first by `updated_at`. Every filter narrows. */
+export interface SessionListRequest {
+  /** Only this owner's sessions (`[auth.owner_aliases]` folded in). */
+  owner?: string;
+  /** Only sessions filed under this format or run by this agent (`origin_agent`). */
+  agent?: string;
+  /** As `SearchRequest.repo`: the normalized remote, or its last path segments. */
+  repo?: string;
+  branch?: string;
+  harness?: string;
+  agent_version?: string;
+  /** Only sessions that used this model. */
+  model?: string;
+  /** Only sessions carrying every one of these labels. */
+  labels?: Labels;
+  source?: string;
+  /** Sessions that overlap the window from `since` to `until` (RFC 3339): those that started
+   * before `until` and ended after `since`. `since` defaults to 7 days ago, `until` to now. */
+  since?: string;
+  until?: string;
+  /** Sessions per page: 1 to 100, 20 by default. */
+  limit?: number;
+  /** The `cursor` of the previous page. */
+  after?: string;
+}
+
+export interface SessionList {
+  sessions: SessionSummary[];
+  /** The window the sessions overlap, as the server read it. */
+  window: { since: string; until?: string };
+  /** Pass as `after` for the next page; absent on the last. */
   cursor?: string;
   index: SearchIndexState;
 }

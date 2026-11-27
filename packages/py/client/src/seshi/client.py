@@ -7,7 +7,7 @@ error the pipeline would have raised (`seshi.errors`).
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Iterator, Mapping
+from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
 from datetime import datetime
 from types import TracebackType
 from typing import Any, Literal, TypeVar, overload
@@ -19,6 +19,10 @@ from . import models as m
 from ._calls import DEFAULT_GZIP_FROM, DEFAULT_TIMEOUT, DEFAULT_USER_AGENT, Call, Settings
 
 T = TypeVar("T")
+
+
+def _time(value: str | datetime | None) -> str | None:
+    return calls.rfc3339(value) if isinstance(value, datetime) else value
 
 
 def _search_request(
@@ -51,12 +55,74 @@ def _search_request(
         model=model,
         label=[f"{key}={value}" for key, value in labels.items()] if labels else None,
         source=source,
-        since=calls.rfc3339(since) if isinstance(since, datetime) else since,
-        until=calls.rfc3339(until) if isinstance(until, datetime) else until,
+        since=_time(since),
+        until=_time(until),
         sort=sort,
         limit=limit,
         matches=matches,
         cursor=cursor,
+    )
+
+
+def _session_list_request(
+    *,
+    owner: str | None,
+    agent: str | None,
+    repo: str | None,
+    branch: str | None,
+    harness: str | None,
+    agent_version: str | None,
+    model: str | None,
+    labels: Mapping[str, str] | None,
+    source: str | None,
+    since: str | datetime | None,
+    until: str | datetime | None,
+    limit: int | None,
+    after: str | None,
+) -> m.SessionListRequest:
+    return m.SessionListRequest(
+        owner=owner,
+        agent=agent,
+        repo=repo,
+        branch=branch,
+        harness=harness,
+        agent_version=agent_version,
+        model=model,
+        label=[f"{key}={value}" for key, value in labels.items()] if labels else None,
+        source=source,
+        since=_time(since),
+        until=_time(until),
+        limit=limit,
+        after=after,
+    )
+
+
+def _events_request(
+    *,
+    from_: int | None,
+    to: int | None,
+    around: int | None,
+    context: int | None,
+    mode: m.EventsMode | None,
+    roles: Sequence[m.EventRole] | None,
+    max_chars: int | None,
+    event: int | None,
+    offset: int | None,
+    trace: str | None,
+    head: str | None,
+) -> m.SessionEventsRequest:
+    return m.SessionEventsRequest(
+        from_=from_,
+        to=to,
+        around=around,
+        context=context,
+        mode=mode,
+        roles=roles if isinstance(roles, str) or roles is None else ",".join(roles),
+        max_chars=max_chars,
+        event=event,
+        offset=offset,
+        trace=trace,
+        head=head,
     )
 
 
@@ -366,6 +432,81 @@ class SeshiClient(_Base):
         """`reviews` by owner and archive id."""
         return self._run(calls.reviews_by_archive(owner, archive_id))
 
+    def session_events(
+        self,
+        format: str,
+        session_id: str,
+        *,
+        owner: str | None = None,
+        from_: int | None = None,
+        to: int | None = None,
+        around: int | None = None,
+        context: int | None = None,
+        mode: m.EventsMode | None = None,
+        roles: Sequence[m.EventRole] | None = None,
+        max_chars: int | None = None,
+        event: int | None = None,
+        offset: int | None = None,
+        trace: str | None = None,
+        head: str | None = None,
+    ) -> m.SessionEvents:
+        """`GET …/events`: part of the session's events, numbered by `seq` across its current
+        traces: `[from_, to)`, or `context` events either side of `around`, or one event's text
+        in pieces (`event`, `offset`). `mode` is `condensed` (tool results cut to 200
+        characters; the default) or `full`; `roles` keeps only those roles; `trace` counts
+        positions in one trace of the chain (a search match's `content_hash` and
+        `event_index`). Every refusal raises `ServerError`: 404 for a session not stored or not
+        readable, 410 `redacted`, 409 `head_changed` when it is no longer `head`, 400
+        `bad_query`."""
+        request = _events_request(
+            from_=from_,
+            to=to,
+            around=around,
+            context=context,
+            mode=mode,
+            roles=roles,
+            max_chars=max_chars,
+            event=event,
+            offset=offset,
+            trace=trace,
+            head=head,
+        )
+        return self._run(calls.session_events(format, session_id, request, owner))
+
+    def session_events_by_archive(
+        self,
+        owner: str,
+        archive_id: str,
+        *,
+        from_: int | None = None,
+        to: int | None = None,
+        around: int | None = None,
+        context: int | None = None,
+        mode: m.EventsMode | None = None,
+        roles: Sequence[m.EventRole] | None = None,
+        max_chars: int | None = None,
+        event: int | None = None,
+        offset: int | None = None,
+        trace: str | None = None,
+        head: str | None = None,
+    ) -> m.SessionEvents:
+        """`session_events` by owner and archive id, as search results and listings name a
+        session."""
+        request = _events_request(
+            from_=from_,
+            to=to,
+            around=around,
+            context=context,
+            mode=mode,
+            roles=roles,
+            max_chars=max_chars,
+            event=event,
+            offset=offset,
+            trace=trace,
+            head=head,
+        )
+        return self._run(calls.session_events_by_archive(owner, archive_id, request))
+
     # --- Change feeds ---------------------------------------------------------------------
 
     def changes(
@@ -470,6 +611,45 @@ class SeshiClient(_Base):
             cursor=cursor,
         )
         return self._run(calls.search(request))
+
+    def search_sessions(
+        self,
+        *,
+        owner: str | None = None,
+        agent: str | None = None,
+        repo: str | None = None,
+        branch: str | None = None,
+        harness: str | None = None,
+        agent_version: str | None = None,
+        model: str | None = None,
+        labels: Mapping[str, str] | None = None,
+        source: str | None = None,
+        since: str | datetime | None = None,
+        until: str | datetime | None = None,
+        limit: int | None = None,
+        after: str | None = None,
+    ) -> m.SessionList:
+        """`GET /v1/search/sessions`: the sessions this credential may read that overlap a
+        window, newest first, with no search words. `since` and `until` are times or ages back
+        from now (`"7d"`, `"24h"`); the last 7 days by default. `after` is the last page's
+        `cursor`. Refused as `search` is: `ServerError` 400 `bad_query`, 503 `index_building`,
+        404 `search_disabled`."""
+        request = _session_list_request(
+            owner=owner,
+            agent=agent,
+            repo=repo,
+            branch=branch,
+            harness=harness,
+            agent_version=agent_version,
+            model=model,
+            labels=labels,
+            source=source,
+            since=since,
+            until=until,
+            limit=limit,
+            after=after,
+        )
+        return self._run(calls.search_sessions(request))
 
     # --- Redaction rules ------------------------------------------------------------------
 
@@ -879,6 +1059,73 @@ class AsyncSeshiClient(_Base):
         """`reviews` by owner and archive id."""
         return await self._run(calls.reviews_by_archive(owner, archive_id))
 
+    async def session_events(
+        self,
+        format: str,
+        session_id: str,
+        *,
+        owner: str | None = None,
+        from_: int | None = None,
+        to: int | None = None,
+        around: int | None = None,
+        context: int | None = None,
+        mode: m.EventsMode | None = None,
+        roles: Sequence[m.EventRole] | None = None,
+        max_chars: int | None = None,
+        event: int | None = None,
+        offset: int | None = None,
+        trace: str | None = None,
+        head: str | None = None,
+    ) -> m.SessionEvents:
+        """`GET …/events` (see `SeshiClient.session_events`)."""
+        request = _events_request(
+            from_=from_,
+            to=to,
+            around=around,
+            context=context,
+            mode=mode,
+            roles=roles,
+            max_chars=max_chars,
+            event=event,
+            offset=offset,
+            trace=trace,
+            head=head,
+        )
+        return await self._run(calls.session_events(format, session_id, request, owner))
+
+    async def session_events_by_archive(
+        self,
+        owner: str,
+        archive_id: str,
+        *,
+        from_: int | None = None,
+        to: int | None = None,
+        around: int | None = None,
+        context: int | None = None,
+        mode: m.EventsMode | None = None,
+        roles: Sequence[m.EventRole] | None = None,
+        max_chars: int | None = None,
+        event: int | None = None,
+        offset: int | None = None,
+        trace: str | None = None,
+        head: str | None = None,
+    ) -> m.SessionEvents:
+        """`session_events` by owner and archive id."""
+        request = _events_request(
+            from_=from_,
+            to=to,
+            around=around,
+            context=context,
+            mode=mode,
+            roles=roles,
+            max_chars=max_chars,
+            event=event,
+            offset=offset,
+            trace=trace,
+            head=head,
+        )
+        return await self._run(calls.session_events_by_archive(owner, archive_id, request))
+
     async def changes(
         self,
         *,
@@ -973,6 +1220,41 @@ class AsyncSeshiClient(_Base):
             cursor=cursor,
         )
         return await self._run(calls.search(request))
+
+    async def search_sessions(
+        self,
+        *,
+        owner: str | None = None,
+        agent: str | None = None,
+        repo: str | None = None,
+        branch: str | None = None,
+        harness: str | None = None,
+        agent_version: str | None = None,
+        model: str | None = None,
+        labels: Mapping[str, str] | None = None,
+        source: str | None = None,
+        since: str | datetime | None = None,
+        until: str | datetime | None = None,
+        limit: int | None = None,
+        after: str | None = None,
+    ) -> m.SessionList:
+        """`GET /v1/search/sessions` (see `SeshiClient.search_sessions`)."""
+        request = _session_list_request(
+            owner=owner,
+            agent=agent,
+            repo=repo,
+            branch=branch,
+            harness=harness,
+            agent_version=agent_version,
+            model=model,
+            labels=labels,
+            source=source,
+            since=since,
+            until=until,
+            limit=limit,
+            after=after,
+        )
+        return await self._run(calls.search_sessions(request))
 
     async def redaction_rules(self) -> m.RedactionRules:
         """`GET /v1/redaction/rules`."""

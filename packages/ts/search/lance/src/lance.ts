@@ -34,6 +34,8 @@ import {
   type PageCommit,
   type ScrubFailure,
   SearchQueryError,
+  type SessionListPage,
+  type SessionListQuery,
   type SessionUpdate,
 } from "@seshi/search";
 import { changeStamp } from "@seshi/store";
@@ -56,6 +58,7 @@ import {
   matchesTree,
   needsCheck,
   prefixesOf,
+  sessionsSql,
   sqlList,
   sqlString,
   sqlTime,
@@ -852,6 +855,35 @@ export class LanceIndex implements IndexStore {
       const page = sorted.slice(q.offset, want);
       const hits = await this.hitsOf(meta, gen, page, q);
       return { total: found.groups.size, hits, ...(found.capped ? { capped: true } : {}) };
+    });
+  }
+
+  async listSessions(q: SessionListQuery): Promise<SessionListPage> {
+    const where = sessionsSql(q);
+    if (where === null) return { sessions: [], more: false };
+    return this.reading(async () => {
+      const meta = await this.meta();
+      const gen = this.live(meta);
+      if (gen === undefined || meta.get(gk(gen, "indexed")) === undefined) {
+        return { sessions: [], more: false };
+      }
+      const rows = await (await this.table(meta, gen, "sessions"))
+        .query()
+        .where(where)
+        .orderBy([
+          { columnName: "updated_ms", ascending: false },
+          { columnName: "id", ascending: false },
+        ])
+        .limit(q.limit + 1)
+        .toArray();
+      const sessions = rows.map((r) => heldOf(r as Record<string, unknown>).session);
+      // The label clauses find candidates by their text; this decides.
+      const labels = Object.entries(q.labels ?? {});
+      const kept =
+        labels.length === 0
+          ? sessions
+          : sessions.filter((s) => labels.every(([k, v]) => s.labels?.[k] === v));
+      return { sessions: kept.slice(0, q.limit), more: rows.length > q.limit };
     });
   }
 
