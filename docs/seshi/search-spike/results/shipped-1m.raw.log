@@ -1,0 +1,380 @@
+Copying gs://seshi-lance-remeasure-1125-54e757/harness/setup.sh to file:///spike/setup.sh
+  
+
+++ command -v /usr/bin/time
+++ apt-get install -y time
+++ export PATH=/root/.bun/bin:/root/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+++ PATH=/root/.bun/bin:/root/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+++ '[' '!' -x /spike/seshi-server ']'
+++ rm -rf /spike/repo
+++ mkdir -p /spike/repo
+++ cd /spike/repo
+++ gcloud storage cp gs://seshi-lance-remeasure-1125-54e757/harness/repo.tgz .
+Copying gs://seshi-lance-remeasure-1125-54e757/harness/repo.tgz to file://./repo.tgz
+  
+
+
+Average throughput: 225.1MiB/s
+++ tar xzf repo.tgz
+++ bun install --frozen-lockfile
+++ tail -3
++ vitest@4.1.12
+
+390 packages installed [1219.00ms]
+++ /usr/bin/time -v bun scripts/build-binary.ts --server --outfile /spike/seshi-server
+++ grep -E 'build|strip|Elapsed|Maximum'
+build: stripped lancedb.linux-x64-gnu.node: 214.8 MB -> 178.9 MB
+build: /spike/seshi-server
+	Command being timed: "bun scripts/build-binary.ts --server --outfile /spike/seshi-server"
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:01.85
+	Maximum resident set size (kbytes): 799452
+++ cd /spike/repo
+++ bun --version
+1.4.2
+++ uname -a
+Linux seshi-lance-remeasure 6.1.0-56-cloud-amd64 #1 SMP PREEMPT_DYNAMIC Debian 6.1.192-2 (2026-11-16) x86_64 GNU/Linux
+++ nproc
+8
+++ free -g
+++ head -2
+               total        used        free      shared  buff/cache   available
+Mem:              31           0          28           0           1          30
+++ df -h /
+++ tail -1
+/dev/sda1        99G  3.4G   91G   4% /
+++ ls -la /spike/seshi-server
+-rwxr-xr-x 1 root root 273008096 Nov 25 18:53 /spike/seshi-server
+++ /spike/seshi-server --version
+seshi 0.28.0
+++ du -sh 'node_modules/@lancedb/*/' packages/ts/search/lance/node_modules/@lancedb/lancedb/
+1.7M	packages/ts/search/lance/node_modules/@lancedb/lancedb/
+++ SH=docs/seshi/search-spike/shipped
++ U=gs://seshi-lance-remeasure-1125-54e757/b1m
++ T bun docs/seshi/search-spike/shipped/build.ts gs://seshi-lance-remeasure-1125-54e757/b1m 1000000
++ /usr/bin/time -v bun docs/seshi/search-spike/shipped/build.ts gs://seshi-lance-remeasure-1125-54e757/b1m 1000000
++ grep -vE '^\s+(Average|Exit|Socket|Signals|Swaps|Page size|File system|Voluntary|Involuntary|Minor|Major|Percent|System time|User time|Command being)'
+generation gmwwhfftebb92d7d1, batchRecords 50000, target 1000000 records
+commit 1 u0 sessions 271 records 20367 took 4089ms total 20096 at 4s (4554/s) rss 0.3GB
+commit 2 u1 sessions 205 records 20292 took 4246ms total 40183 at 9s (4446/s) rss 0.7GB
+commit 3 u2 sessions 215 records 20659 took 4429ms total 60627 at 14s (4372/s) rss 1.0GB
+commit 4 u3 sessions 243 records 20358 took 4166ms total 80742 at 18s (4380/s) rss 1.0GB
+  optimize 7678ms rss 1.0GB
+commit 5 u4 sessions 223 records 20255 took 11822ms total 100774 at 31s (3296/s) rss 1.0GB
+commit 6 u5 sessions 278 records 20530 took 4030ms total 121026 at 35s (3467/s) rss 1.1GB
+commit 7 u6 sessions 210 records 20215 took 4412ms total 141031 at 40s (3561/s) rss 1.4GB
+commit 8 u7 sessions 242 records 20274 took 4464ms total 161063 at 44s (3629/s) rss 1.3GB
+commit 9 u8 sessions 213 records 22014 took 4614ms total 182864 at 49s (3701/s) rss 1.3GB
+  optimize 8043ms rss 1.6GB
+commit 10 u9 sessions 225 records 20278 took 12507ms total 202917 at 62s (3263/s) rss 1.6GB
+commit 11 u10 sessions 230 records 20257 took 4298ms total 222944 at 67s (3340/s) rss 1.4GB
+commit 12 u11 sessions 246 records 20298 took 4361ms total 242996 at 71s (3400/s) rss 1.4GB
+commit 13 u12 sessions 214 records 20218 took 4353ms total 263000 at 76s (3455/s) rss 1.6GB
+commit 14 u13 sessions 205 records 20655 took 4508ms total 283450 at 81s (3502/s) rss 1.4GB
+  optimize 12428ms rss 1.4GB
+commit 15 u14 sessions 257 records 20282 took 17069ms total 303475 at 98s (3087/s) rss 1.4GB
+commit 16 u15 sessions 166 records 21607 took 4602ms total 324916 at 103s (3146/s) rss 1.6GB
+commit 17 u16 sessions 167 records 20224 took 4413ms total 344973 at 108s (3193/s) rss 1.6GB
+commit 18 u17 sessions 195 records 20471 took 4339ms total 365249 at 113s (3241/s) rss 1.7GB
+commit 19 u18 sessions 262 records 20272 took 4430ms total 385259 at 117s (3281/s) rss 1.6GB
+  optimize 14426ms rss 1.5GB
+commit 20 u19 sessions 224 records 20235 took 18799ms total 405270 at 137s (2968/s) rss 1.5GB
+commit 21 u20 sessions 153 records 20166 took 4357ms total 425283 at 141s (3010/s) rss 1.7GB
+commit 22 u21 sessions 233 records 20260 took 4361ms total 445310 at 146s (3051/s) rss 1.7GB
+commit 23 u22 sessions 244 records 20286 took 4329ms total 465352 at 151s (3089/s) rss 1.7GB
+commit 24 u23 sessions 261 records 20492 took 4323ms total 485583 at 155s (3126/s) rss 1.7GB
+  optimize 16092ms rss 1.7GB
+commit 25 u24 sessions 245 records 20545 took 20510ms total 505883 at 176s (2871/s) rss 1.7GB
+commit 26 u25 sessions 230 records 20236 took 4393ms total 525889 at 181s (2906/s) rss 1.8GB
+commit 27 u26 sessions 200 records 20630 took 4453ms total 546319 at 186s (2942/s) rss 1.9GB
+commit 28 u27 sessions 282 records 22635 took 4596ms total 568672 at 191s (2983/s) rss 1.8GB
+commit 29 u28 sessions 296 records 20299 took 4337ms total 588675 at 195s (3015/s) rss 2.1GB
+  optimize 17123ms rss 1.8GB
+commit 30 u29 sessions 239 records 20453 took 21522ms total 608889 at 217s (2805/s) rss 1.8GB
+commit 31 u30 sessions 225 records 20315 took 4537ms total 628979 at 222s (2832/s) rss 1.9GB
+commit 32 u31 sessions 246 records 20251 took 4444ms total 648984 at 227s (2859/s) rss 2.0GB
+commit 33 u32 sessions 270 records 20281 took 4377ms total 668995 at 232s (2887/s) rss 2.0GB
+commit 34 u33 sessions 331 records 20397 took 4338ms total 689061 at 237s (2913/s) rss 2.0GB
+  optimize 18584ms rss 1.7GB
+commit 35 u34 sessions 309 records 20781 took 23070ms total 709533 at 260s (2729/s) rss 1.7GB
+commit 36 u35 sessions 252 records 20253 took 4351ms total 729534 at 265s (2757/s) rss 1.8GB
+commit 37 u36 sessions 247 records 20256 took 4143ms total 749543 at 269s (2786/s) rss 2.1GB
+commit 38 u37 sessions 181 records 20446 took 4310ms total 769808 at 274s (2812/s) rss 1.9GB
+commit 39 u38 sessions 258 records 20529 took 4390ms total 790079 at 278s (2838/s) rss 2.0GB
+  optimize 19966ms rss 1.8GB
+commit 40 u39 sessions 233 records 20296 took 24331ms total 810142 at 303s (2673/s) rss 1.8GB
+commit 41 u40 sessions 235 records 20316 took 4383ms total 830223 at 308s (2697/s) rss 1.9GB
+commit 42 u41 sessions 266 records 20306 took 4202ms total 850263 at 312s (2722/s) rss 2.0GB
+commit 43 u42 sessions 257 records 21277 took 4448ms total 871283 at 317s (2747/s) rss 2.0GB
+commit 44 u43 sessions 224 records 20233 took 4396ms total 891292 at 322s (2768/s) rss 2.0GB
+  optimize 20931ms rss 2.0GB
+commit 45 u44 sessions 198 records 20488 took 25266ms total 911582 at 348s (2622/s) rss 2.0GB
+commit 46 u45 sessions 273 records 20307 took 4554ms total 931616 at 352s (2643/s) rss 2.1GB
+commit 47 u46 sessions 214 records 20239 took 4555ms total 951641 at 357s (2664/s) rss 2.2GB
+commit 48 u47 sessions 215 records 21383 took 4504ms total 972809 at 362s (2686/s) rss 2.2GB
+commit 49 u48 sessions 295 records 20306 took 4613ms total 992820 at 367s (2705/s) rss 2.1GB
+commit 50 u49 sessions 92 records 7344 took 3059ms total 1000072 at 370s (2701/s) rss 2.2GB
+  textIndexes 61374ms rss 2.3GB
+  textIndexes 0ms rss 2.3GB
+  textIndexes 0ms rss 2.3GB
+  textIndexes 0ms rss 2.3GB
+  textIndexes 0ms rss 2.3GB
+records 1000072, sessions 11695, commits 50
+commits (incl. build-time optimize) 370s = 2701 records/s
+build-time optimize: 9 runs, 135s total, last 20931ms
+commit time without optimize: 218s
+passDone (full-text indexes) 62s; text indexes 61374ms, 0ms, 0ms, 0ms, 0ms
+total 432s = 7.2 min, 2313 records/s
+state {"ready_at":"2026-11-25T19:00:11.060Z","caught_up_at":"2026-11-25T19:00:11.060Z","sessions":11695,"events":1000072,"generation":"gmwwhfftebb92d7d1"}
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 7:18.05
+	Maximum resident set size (kbytes): 3206608
++ gcloud storage du -s gs://seshi-lance-remeasure-1125-54e757/b1m
+7391161980   gs://seshi-lance-remeasure-1125-54e757/b1m
++ bun docs/seshi/search-spike/shipped/search.ts gs://seshi-lance-remeasure-1125-54e757/b1m 5
+state {"ready_at":"2026-11-25T19:00:11.060Z","caught_up_at":"2026-11-25T19:00:11.060Z","sessions":11695,"events":1000072,"generation":"gmwwhfftebb92d7d1"}
+sort | filter | query | open | first | warm p50 | warm p90 | min | total | capped
+relevance | admin | rare word [zeppelinx] | 221ms | 1993ms | 164ms | 197ms | 148ms | 10 sessions, 10 hits | 
+relevance | admin | one common word [error] | 184ms | 2077ms | 370ms | 401ms | 308ms | 4541 sessions, 20 hits | capped
+relevance | admin | two common words, AND [error test] | 173ms | 1806ms | 367ms | 440ms | 285ms | 4521 sessions, 20 hits | capped
+relevance | admin | phrase ["flaky checkout test"] | 187ms | 1848ms | 346ms | 391ms | 293ms | 2978 sessions, 20 hits | 
+relevance | admin | NOT [deploy -staging] | 207ms | 1821ms | 438ms | 547ms | 389ms | 4504 sessions, 20 hits | capped
+relevance | admin | OR [rollback OR deployer] | 200ms | 1760ms | 304ms | 425ms | 279ms | 4484 sessions, 20 hits | capped
+relevance | admin | very common word [the] | 177ms | 1534ms | 334ms | 384ms | 290ms | 4462 sessions, 20 hits | capped
+relevance | admin | prefix, common (deplo*) [deplo*] | 195ms | 2638ms | 1127ms | 1349ms | 1106ms | 4469 sessions, 20 hits | capped
+relevance | admin | prefix, 2 letters (de*) [de*] | 248ms | 2238ms | 1126ms | 1260ms | 1071ms | 4513 sessions, 20 hits | capped
+relevance | admin | prefix, mid-frequency (rollb*) [rollb*] | 202ms | 2662ms | 1479ms | 1549ms | 1456ms | 2787 sessions, 20 hits | 
+relevance | admin | prefix, rare (zeppel*) [zeppel*] | 194ms | 1297ms | 139ms | 200ms | 128ms | 10 sessions, 10 hits | 
+relevance | admin | prefix, past 8 letters (deployment*) [deployment*] | 190ms | 2345ms | 1237ms | 2073ms | 1122ms | 4581 sessions, 20 hits | capped
+relevance | admin | word and prefix (error deplo*) [error deplo*] | 268ms | 2796ms | 1550ms | 1598ms | 1474ms | 4522 sessions, 20 hits | capped
+relevance | admin | phrase and prefix ("checkout test fail"*) ["checkout test fail"*] | 233ms | 3012ms | 1507ms | 1630ms | 1432ms | 2978 sessions, 20 hits | 
+relevance | admin | NOT a prefix (error -deplo*) [error -deplo*] | 199ms | 2464ms | 1329ms | 1360ms | 1236ms | 3699 sessions, 20 hits | capped
+relevance | member | rare word [zeppelinx] | 213ms | 1352ms | 214ms | 229ms | 166ms | 6 sessions, 6 hits | 
+relevance | member | one common word [error] | 212ms | 1598ms | 418ms | 440ms | 400ms | 4244 sessions, 20 hits | capped
+relevance | member | two common words, AND [error test] | 222ms | 1736ms | 394ms | 433ms | 361ms | 4211 sessions, 20 hits | capped
+relevance | member | phrase ["flaky checkout test"] | 214ms | 1975ms | 298ms | 469ms | 287ms | 2559 sessions, 20 hits | 
+relevance | member | NOT [deploy -staging] | 196ms | 1672ms | 410ms | 428ms | 389ms | 4166 sessions, 20 hits | capped
+relevance | member | OR [rollback OR deployer] | 200ms | 1506ms | 363ms | 390ms | 315ms | 4170 sessions, 20 hits | capped
+relevance | member | very common word [the] | 177ms | 1509ms | 408ms | 424ms | 374ms | 4134 sessions, 20 hits | capped
+relevance | member | prefix, common (deplo*) [deplo*] | 194ms | 2358ms | 1258ms | 1367ms | 1209ms | 4177 sessions, 20 hits | capped
+relevance | member | prefix, 2 letters (de*) [de*] | 207ms | 2291ms | 1171ms | 1356ms | 1098ms | 4238 sessions, 20 hits | capped
+relevance | member | prefix, mid-frequency (rollb*) [rollb*] | 178ms | 2804ms | 1497ms | 1513ms | 1460ms | 2384 sessions, 20 hits | 
+relevance | member | prefix, rare (zeppel*) [zeppel*] | 196ms | 1341ms | 191ms | 211ms | 182ms | 6 sessions, 6 hits | 
+relevance | member | prefix, past 8 letters (deployment*) [deployment*] | 193ms | 2235ms | 1180ms | 1271ms | 1116ms | 4253 sessions, 20 hits | capped
+relevance | member | word and prefix (error deplo*) [error deplo*] | 220ms | 2497ms | 1553ms | 1594ms | 1496ms | 4229 sessions, 20 hits | capped
+relevance | member | phrase and prefix ("checkout test fail"*) ["checkout test fail"*] | 188ms | 2976ms | 1510ms | 1525ms | 1408ms | 2559 sessions, 20 hits | 
+relevance | member | NOT a prefix (error -deplo*) [error -deplo*] | 192ms | 2427ms | 1366ms | 1416ms | 1314ms | 3461 sessions, 20 hits | capped
+relevance | member+label+model | rare word [zeppelinx] | 189ms | 1194ms | 169ms | 174ms | 167ms | 1 sessions, 1 hits | 
+relevance | member+label+model | one common word [error] | 191ms | 1575ms | 387ms | 396ms | 362ms | 802 sessions, 20 hits | capped
+relevance | member+label+model | two common words, AND [error test] | 212ms | 1672ms | 400ms | 460ms | 383ms | 800 sessions, 20 hits | capped
+relevance | member+label+model | phrase ["flaky checkout test"] | 188ms | 1663ms | 336ms | 382ms | 319ms | 237 sessions, 20 hits | 
+relevance | member+label+model | NOT [deploy -staging] | 164ms | 1549ms | 379ms | 391ms | 334ms | 801 sessions, 20 hits | capped
+relevance | member+label+model | OR [rollback OR deployer] | 205ms | 1566ms | 310ms | 847ms | 296ms | 610 sessions, 20 hits | 
+relevance | member+label+model | very common word [the] | 217ms | 1455ms | 448ms | 767ms | 437ms | 780 sessions, 20 hits | capped
+relevance | member+label+model | prefix, common (deplo*) [deplo*] | 174ms | 2975ms | 1032ms | 1145ms | 923ms | 795 sessions, 20 hits | capped
+relevance | member+label+model | prefix, 2 letters (de*) [de*] | 189ms | 2049ms | 938ms | 984ms | 885ms | 795 sessions, 20 hits | capped
+relevance | member+label+model | prefix, mid-frequency (rollb*) [rollb*] | 178ms | 1584ms | 497ms | 1370ms | 464ms | 203 sessions, 20 hits | 
+relevance | member+label+model | prefix, rare (zeppel*) [zeppel*] | 197ms | 1353ms | 188ms | 298ms | 159ms | 1 sessions, 1 hits | 
+relevance | member+label+model | prefix, past 8 letters (deployment*) [deployment*] | 211ms | 2271ms | 1077ms | 1166ms | 1045ms | 782 sessions, 20 hits | 
+relevance | member+label+model | word and prefix (error deplo*) [error deplo*] | 187ms | 2336ms | 1111ms | 1211ms | 1058ms | 793 sessions, 20 hits | capped
+relevance | member+label+model | phrase and prefix ("checkout test fail"*) ["checkout test fail"*] | 209ms | 2091ms | 493ms | 560ms | 479ms | 237 sessions, 20 hits | 
+relevance | member+label+model | NOT a prefix (error -deplo*) [error -deplo*] | 173ms | 2171ms | 1153ms | 1272ms | 1117ms | 741 sessions, 20 hits | capped
+recent | admin | rare word [zeppelinx] | 193ms | 1281ms | 150ms | 176ms | 139ms | 10 sessions, 10 hits | 
+recent | admin | one common word [error] | 220ms | 2659ms | 1326ms | 1444ms | 1299ms | 95 sessions, 20 hits | capped
+recent | admin | two common words, AND [error test] | 179ms | 2507ms | 1232ms | 1251ms | 1152ms | 95 sessions, 20 hits | capped
+recent | admin | phrase ["flaky checkout test"] | 213ms | 1415ms | 276ms | 340ms | 242ms | 2978 sessions, 20 hits | 
+recent | admin | NOT [deploy -staging] | 210ms | 2366ms | 1159ms | 1183ms | 1023ms | 90 sessions, 20 hits | capped
+recent | admin | OR [rollback OR deployer] | 201ms | 1573ms | 403ms | 465ms | 370ms | 7895 sessions, 20 hits | 
+recent | admin | very common word [the] | 195ms | 2506ms | 1406ms | 1460ms | 1366ms | 95 sessions, 20 hits | capped
+recent | admin | prefix, common (deplo*) [deplo*] | 232ms | 4607ms | 3451ms | 3626ms | 3373ms | 92 sessions, 20 hits | capped
+recent | admin | prefix, 2 letters (de*) [de*] | 210ms | 4408ms | 3197ms | 3386ms | 3001ms | 95 sessions, 20 hits | capped
+recent | admin | prefix, mid-frequency (rollb*) [rollb*] | 219ms | 2672ms | 1601ms | 1711ms | 1464ms | 2787 sessions, 20 hits | 
+recent | admin | prefix, rare (zeppel*) [zeppel*] | 186ms | 1343ms | 223ms | 233ms | 150ms | 10 sessions, 10 hits | 
+recent | admin | prefix, past 8 letters (deployment*) [deployment*] | 205ms | 5851ms | 4976ms | 5287ms | 4907ms | 79 sessions, 20 hits | capped
+recent | admin | word and prefix (error deplo*) [error deplo*] | 203ms | 5513ms | 4118ms | 4159ms | 3989ms | 91 sessions, 20 hits | capped
+recent | admin | phrase and prefix ("checkout test fail"*) ["checkout test fail"*] | 199ms | 2914ms | 1473ms | 1570ms | 1441ms | 2978 sessions, 20 hits | 
+recent | admin | NOT a prefix (error -deplo*) [error -deplo*] | 201ms | 5903ms | 4707ms | 4782ms | 4475ms | 95 sessions, 20 hits | capped
+recent | member | rare word [zeppelinx] | 205ms | 1339ms | 168ms | 238ms | 160ms | 6 sessions, 6 hits | 
+recent | member | one common word [error] | 209ms | 2532ms | 1263ms | 1434ms | 1188ms | 86 sessions, 20 hits | capped
+recent | member | two common words, AND [error test] | 199ms | 2692ms | 1181ms | 1253ms | 1006ms | 86 sessions, 20 hits | capped
+recent | member | phrase ["flaky checkout test"] | 215ms | 1788ms | 284ms | 304ms | 277ms | 2559 sessions, 20 hits | 
+recent | member | NOT [deploy -staging] | 195ms | 2306ms | 1102ms | 1151ms | 1040ms | 81 sessions, 20 hits | capped
+recent | member | OR [rollback OR deployer] | 190ms | 1685ms | 426ms | 624ms | 367ms | 6747 sessions, 20 hits | 
+recent | member | very common word [the] | 190ms | 2670ms | 1360ms | 1511ms | 1334ms | 86 sessions, 20 hits | capped
+recent | member | prefix, common (deplo*) [deplo*] | 170ms | 4895ms | 3570ms | 3657ms | 3429ms | 83 sessions, 20 hits | capped
+recent | member | prefix, 2 letters (de*) [de*] | 201ms | 5049ms | 3184ms | 3460ms | 3055ms | 86 sessions, 20 hits | capped
+recent | member | prefix, mid-frequency (rollb*) [rollb*] | 203ms | 2631ms | 1441ms | 1534ms | 1369ms | 2384 sessions, 20 hits | 
+recent | member | prefix, rare (zeppel*) [zeppel*] | 202ms | 1192ms | 203ms | 216ms | 153ms | 6 sessions, 6 hits | 
+recent | member | prefix, past 8 letters (deployment*) [deployment*] | 191ms | 5370ms | 4568ms | 4822ms | 4476ms | 8795 sessions, 20 hits | 
+recent | member | word and prefix (error deplo*) [error deplo*] | 225ms | 5394ms | 4119ms | 4482ms | 4011ms | 83 sessions, 20 hits | capped
+recent | member | phrase and prefix ("checkout test fail"*) ["checkout test fail"*] | 203ms | 2964ms | 1395ms | 1475ms | 1374ms | 2559 sessions, 20 hits | 
+recent | member | NOT a prefix (error -deplo*) [error -deplo*] | 188ms | 5830ms | 4632ms | 5047ms | 4503ms | 85 sessions, 20 hits | capped
+recent | member+label+model | rare word [zeppelinx] | 205ms | 1297ms | 166ms | 201ms | 145ms | 1 sessions, 1 hits | 
+recent | member+label+model | one common word [error] | 187ms | 1723ms | 612ms | 631ms | 530ms | 882 sessions, 20 hits | 
+recent | member+label+model | two common words, AND [error test] | 187ms | 1705ms | 453ms | 511ms | 419ms | 874 sessions, 20 hits | 
+recent | member+label+model | phrase ["flaky checkout test"] | 204ms | 1889ms | 358ms | 393ms | 300ms | 237 sessions, 20 hits | 
+recent | member+label+model | NOT [deploy -staging] | 206ms | 1800ms | 436ms | 461ms | 384ms | 844 sessions, 20 hits | 
+recent | member+label+model | OR [rollback OR deployer] | 206ms | 1428ms | 331ms | 356ms | 271ms | 610 sessions, 20 hits | 
+recent | member+label+model | very common word [the] | 214ms | 2101ms | 746ms | 800ms | 685ms | 884 sessions, 20 hits | 
+recent | member+label+model | prefix, common (deplo*) [deplo*] | 202ms | 3624ms | 2036ms | 2181ms | 1968ms | 867 sessions, 20 hits | 
+recent | member+label+model | prefix, 2 letters (de*) [de*] | 198ms | 4402ms | 3375ms | 3393ms | 3220ms | 884 sessions, 20 hits | 
+recent | member+label+model | prefix, mid-frequency (rollb*) [rollb*] | 200ms | 1907ms | 501ms | 828ms | 456ms | 203 sessions, 20 hits | 
+recent | member+label+model | prefix, rare (zeppel*) [zeppel*] | 189ms | 1238ms | 195ms | 241ms | 169ms | 1 sessions, 1 hits | 
+recent | member+label+model | prefix, past 8 letters (deployment*) [deployment*] | 409ms | 2770ms | 1219ms | 1376ms | 1190ms | 782 sessions, 20 hits | 
+recent | member+label+model | word and prefix (error deplo*) [error deplo*] | 164ms | 3028ms | 1931ms | 2012ms | 1850ms | 853 sessions, 20 hits | 
+recent | member+label+model | phrase and prefix ("checkout test fail"*) ["checkout test fail"*] | 228ms | 2665ms | 493ms | 525ms | 466ms | 237 sessions, 20 hits | 
+recent | member+label+model | NOT a prefix (error -deplo*) [error -deplo*] | 192ms | 3938ms | 2864ms | 3034ms | 2719ms | 872 sessions, 20 hits | 
++ T bun docs/seshi/search-spike/shipped/steady.ts gs://seshi-lance-remeasure-1125-54e757/b1m commit 10
++ /usr/bin/time -v bun docs/seshi/search-spike/shipped/steady.ts gs://seshi-lance-remeasure-1125-54e757/b1m commit 10
++ grep -vE '^\s+(Average|Exit|Socket|Signals|Swaps|Page size|File system|Voluntary|Involuntary|Minor|Major|Percent|System time|User time|Command being)'
+generation gmwwhfftebb92d7d1 {"ready_at":"2026-11-25T19:00:11.060Z","caught_up_at":"2026-11-25T19:00:11.060Z","sessions":11695,"events":1000072,"generation":"gmwwhfftebb92d7d1"}
+page 0 u0: 49 sessions (35 held), 1796 records, refused 0, removed 1: 3294ms check 687ms, events 1012ms, delete 336ms, scrub_due 0ms, sessions 269ms, changes 0ms, seen 597ms, cursor 392ms rss 0.5GB
+page 1 u1: 49 sessions (35 held), 1676 records, refused 0, removed 1: 2524ms check 408ms, events 641ms, delete 302ms, scrub_due 0ms, sessions 276ms, changes 0ms, seen 544ms, cursor 353ms rss 0.8GB
+page 2 u2: 49 sessions (35 held), 2185 records, refused 0, removed 1: 2594ms check 487ms, events 633ms, delete 276ms, scrub_due 0ms, sessions 275ms, changes 0ms, seen 550ms, cursor 373ms rss 0.8GB
+page 3 u3: 49 sessions (35 held), 1325 records, refused 0, removed 1: 2435ms check 409ms, events 632ms, delete 282ms, scrub_due 0ms, sessions 264ms, changes 0ms, seen 491ms, cursor 357ms rss 0.8GB
+page 4 u4: 49 sessions (35 held), 2064 records, refused 0, removed 1: 2579ms check 439ms, events 717ms, delete 297ms, scrub_due 0ms, sessions 279ms, changes 0ms, seen 501ms, cursor 347ms rss 0.9GB
+page 5 u5: 49 sessions (35 held), 2066 records, refused 0, removed 1: 2545ms check 455ms, events 729ms, delete 294ms, scrub_due 0ms, sessions 256ms, changes 0ms, seen 471ms, cursor 339ms rss 0.9GB
+page 6 u6: 49 sessions (35 held), 1835 records, refused 0, removed 1: 2401ms check 396ms, events 656ms, delete 316ms, scrub_due 0ms, sessions 244ms, changes 0ms, seen 469ms, cursor 320ms rss 0.9GB
+page 7 u7: 49 sessions (35 held), 1890 records, refused 0, removed 1: 2449ms check 451ms, events 639ms, delete 296ms, scrub_due 0ms, sessions 238ms, changes 0ms, seen 506ms, cursor 319ms rss 0.9GB
+page 8 u8: 49 sessions (35 held), 2668 records, refused 0, removed 1: 2440ms check 457ms, events 645ms, delete 287ms, scrub_due 0ms, sessions 215ms, changes 0ms, seen 504ms, cursor 333ms rss 0.9GB
+page 9 u9: 49 sessions (35 held), 4455 records, refused 0, removed 1: 2888ms check 634ms, events 873ms, delete 330ms, scrub_due 0ms, sessions 246ms, changes 0ms, seen 464ms, cursor 342ms rss 1.0GB
+commit p50 2545ms p90 3294ms max 3294ms
+  check: p50 455ms max 687ms
+  events: p50 656ms max 1012ms
+  delete: p50 297ms max 336ms
+  scrub_due: p50 0ms max 0ms
+  sessions: p50 264ms max 279ms
+  changes: p50 0ms max 0ms
+  seen: p50 504ms max 597ms
+  cursor: p50 347ms max 392ms
+state {"ready_at":"2026-11-25T19:00:11.060Z","caught_up_at":"2026-11-25T19:00:11.060Z","sessions":11695,"events":1000072,"generation":"gmwwhfftebb92d7d1"}
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:29.19
+	Maximum resident set size (kbytes): 1303744
++ T bun docs/seshi/search-spike/shipped/steady.ts gs://seshi-lance-remeasure-1125-54e757/b1m optimize
++ /usr/bin/time -v bun docs/seshi/search-spike/shipped/steady.ts gs://seshi-lance-remeasure-1125-54e757/b1m optimize
++ grep -vE '^\s+(Average|Exit|Socket|Signals|Swaps|Page size|File system|Voluntary|Involuntary|Minor|Major|Percent|System time|User time|Command being)'
+generation gmwwhfftebb92d7d1 {"ready_at":"2026-11-25T19:00:11.060Z","caught_up_at":"2026-11-25T19:00:11.060Z","sessions":11695,"events":1000072,"generation":"gmwwhfftebb92d7d1"}
+maintain (optimize every table) 134.6s rss 3.3GB
+state {"ready_at":"2026-11-25T19:00:11.060Z","caught_up_at":"2026-11-25T19:00:11.060Z","sessions":11695,"events":1000072,"generation":"gmwwhfftebb92d7d1"}
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 2:15.30
+	Maximum resident set size (kbytes): 3685200
++ T bun docs/seshi/search-spike/shipped/steady.ts gs://seshi-lance-remeasure-1125-54e757/b1m scrub
++ /usr/bin/time -v bun docs/seshi/search-spike/shipped/steady.ts gs://seshi-lance-remeasure-1125-54e757/b1m scrub
++ grep -vE '^\s+(Average|Exit|Socket|Signals|Swaps|Page size|File system|Voluntary|Involuntary|Minor|Major|Percent|System time|User time|Command being)'
+generation gmwwhfftebb92d7d1 {"ready_at":"2026-11-25T19:00:11.060Z","caught_up_at":"2026-11-25T19:00:11.060Z","sessions":11695,"events":1000072,"generation":"gmwwhfftebb92d7d1"}
+scrub page: 3053ms, removed 1
+maintain (scrub) 89.2s rss 3.5GB
+state {"ready_at":"2026-11-25T19:00:11.060Z","caught_up_at":"2026-11-25T19:00:11.060Z","sessions":11695,"events":1000072,"generation":"gmwwhfftebb92d7d1"}
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 1:33.55
+	Maximum resident set size (kbytes): 4685024
++ gcloud storage du -s gs://seshi-lance-remeasure-1125-54e757/b1m
+6825789940   gs://seshi-lance-remeasure-1125-54e757/b1m
++ S=gs://seshi-lance-remeasure-1125-54e757/e2e
++ T bun docs/seshi/search-spike/shipped/store.ts gs://seshi-lance-remeasure-1125-54e757/e2e 1000000 32
++ /usr/bin/time -v bun docs/seshi/search-spike/shipped/store.ts gs://seshi-lance-remeasure-1125-54e757/e2e 1000000 32
++ grep -vE '^\s+(Average|Exit|Socket|Signals|Swaps|Page size|File system|Voluntary|Involuntary|Minor|Major|Percent|System time|User time|Command being)'
+11695 sessions, 1000072 records, 50 owners, concurrency 32
+500/11695 sessions, 42801 records, 11s, rss 1.5GB
+1000/11695 sessions, 85816 records, 21s, rss 1.5GB
+1500/11695 sessions, 127255 records, 31s, rss 1.6GB
+2000/11695 sessions, 171152 records, 42s, rss 1.6GB
+2500/11695 sessions, 216204 records, 52s, rss 1.5GB
+3000/11695 sessions, 260651 records, 63s, rss 1.8GB
+3500/11695 sessions, 305438 records, 73s, rss 1.6GB
+4000/11695 sessions, 364650 records, 87s, rss 1.6GB
+4500/11695 sessions, 405861 records, 97s, rss 1.6GB
+5000/11695 sessions, 455087 records, 109s, rss 1.5GB
+5500/11695 sessions, 494119 records, 118s, rss 1.6GB
+6000/11695 sessions, 541121 records, 129s, rss 1.6GB
+6500/11695 sessions, 578098 records, 138s, rss 1.6GB
+7000/11695 sessions, 621232 records, 148s, rss 1.7GB
+7500/11695 sessions, 659997 records, 157s, rss 1.6GB
+8000/11695 sessions, 692740 records, 165s, rss 1.6GB
+8500/11695 sessions, 728857 records, 173s, rss 1.6GB
+9000/11695 sessions, 774778 records, 184s, rss 1.6GB
+9500/11695 sessions, 816344 records, 194s, rss 1.7GB
+10000/11695 sessions, 855874 records, 204s, rss 1.6GB
+10500/11695 sessions, 902437 records, 215s, rss 1.7GB
+11000/11695 sessions, 943105 records, 225s, rss 1.7GB
+11500/11695 sessions, 984206 records, 235s, rss 1.6GB
+wrote 11695 sessions, 1000072 records in 239s
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 4:12.56
+	Maximum resident set size (kbytes): 1900196
++ gcloud storage du -s gs://seshi-lance-remeasure-1125-54e757/e2e
+622036997    gs://seshi-lance-remeasure-1125-54e757/e2e
++ sleep 330
++ cat
+++ head -c 24 /dev/urandom
+++ od -An -tx1
+++ tr -d ' \n'
++ export BENCH_TOKEN=<token>
++ BENCH_TOKEN=<token>
+++ date +%s
++ start=1795635250
+++ seq 1 20
++ for i in $(seq 1 20)
+++ T /spike/seshi-server sync search --config /spike/seshi.toml
+++ /usr/bin/time -v /spike/seshi-server sync search --config /spike/seshi.toml
+++ grep -vE '^\s+(Average|Exit|Socket|Signals|Swaps|Page size|File system|Voluntary|Involuntary|Minor|Major|Percent|System time|User time|Command being)'
++ out='search: 10630 change entries read from 50 owners, 10630 sessions indexed, 0 removed
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 11:51.64
+	Maximum resident set size (kbytes): 3467260'
++ echo 'search: 10630 change entries read from 50 owners, 10630 sessions indexed, 0 removed
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 11:51.64
+	Maximum resident set size (kbytes): 3467260'
+search: 10630 change entries read from 50 owners, 10630 sessions indexed, 0 removed
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 11:51.64
+	Maximum resident set size (kbytes): 3467260
++ echo 'search: 10630 change entries read from 50 owners, 10630 sessions indexed, 0 removed
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 11:51.64
+	Maximum resident set size (kbytes): 3467260'
++ grep -q 'more to read'
++ break
+++ date +%s
++ echo 'e2e sync search total 712s'
+e2e sync search total 712s
++ /spike/seshi-server search --status --config /spike/seshi.toml
+index gs://seshi-lance-remeasure-1125-54e757/e2e/search/ad8f044c-1d72-4b20-a36b-e23c68391131 (LanceDB, kept by the worker)
+ready since 2026-11-25 19:43; last caught up 2026-11-25 19:43
+10630 sessions, 992726 records indexed (generation gmwwiv7i1243fc094)
++ gcloud storage du -s gs://seshi-lance-remeasure-1125-54e757/e2e/search
+10292850989  gs://seshi-lance-remeasure-1125-54e757/e2e/search
++ SERVE=7780
++ sleep 10
++ /spike/seshi-server serve --roles api --listen 127.0.0.1:7200 --config /spike/seshi.toml
++ bun docs/seshi/search-spike/shipped/http.ts http://127.0.0.1:7200 <token> 5
+sort | query | first | warm p50 | warm p90 | total
+relevance | zeppelinx | 2643ms | 208ms | 220ms | 6
+relevance | error | 1336ms | 420ms | 494ms | 4183 (capped)
+relevance | error test | 914ms | 347ms | 450ms | 4149 (capped)
+relevance | "flaky checkout test" | 1073ms | 342ms | 489ms | 2513
+relevance | deploy -staging | 1085ms | 370ms | 440ms | 4113 (capped)
+relevance | rollback OR deployer | 958ms | 301ms | 398ms | 4120 (capped)
+relevance | the | 592ms | 387ms | 471ms | 4086 (capped)
+relevance | deplo* | 2089ms | 1160ms | 1361ms | 4134 (capped)
+relevance | de* | 1407ms | 1087ms | 1166ms | 4226 (capped)
+relevance | rollb* | 1664ms | 1415ms | 1616ms | 2347
+relevance | error deplo* | 1657ms | 1402ms | 1515ms | 4170 (capped)
+recent | zeppelinx | 156ms | 150ms | 223ms | 6
+recent | error | 2085ms | 1732ms | 1771ms | 8383 (capped)
+recent | error test | 1592ms | 1563ms | 1748ms | 8401 (capped)
+recent | "flaky checkout test" | 310ms | 248ms | 299ms | 2513
+recent | deploy -staging | 1483ms | 1525ms | 1664ms | 8412 (capped)
+recent | rollback OR deployer | 366ms | 361ms | 370ms | 6532
+recent | the | 1729ms | 1811ms | 1840ms | 8378 (capped)
+recent | deplo* | 5394ms | 5163ms | 5338ms | 8419 (capped)
+recent | de* | 4291ms | 4173ms | 4269ms | 8449 (capped)
+recent | rollb* | 1467ms | 1356ms | 1658ms | 2347
+recent | error deplo* | 6235ms | 6262ms | 6346ms | 8414 (capped)
++ for q in zeppelinx error 'deplo*'
++ /usr/bin/time -f 'binary CLI cold search [zeppelinx]: %e s, %M KB' /spike/seshi-server search --config /spike/seshi.toml zeppelinx
+binary CLI cold search [zeppelinx]: 2.15 s, 359208 KB
++ for q in zeppelinx error 'deplo*'
++ /usr/bin/time -f 'binary CLI cold search [error]: %e s, %M KB' /spike/seshi-server search --config /spike/seshi.toml error
+binary CLI cold search [error]: 2.00 s, 415240 KB
++ for q in zeppelinx error 'deplo*'
++ /usr/bin/time -f 'binary CLI cold search [deplo*]: %e s, %M KB' /spike/seshi-server search --config /spike/seshi.toml 'deplo*'
+binary CLI cold search [deplo*]: 3.03 s, 593632 KB
++ kill 7780
++ tail -3 /spike/serve.log
+roles: api (instance seshi-lance-remeasure)
+seshi 0.28.0 listening on http://127.0.0.1:7200, storing sessions in gs://seshi-lance-remeasure-1125-54e757/e2e (deployment ad8f044c-1d72-4b20-a36b-e23c68391131); accepting the org key, static tokens for bench, seshi tokens (config /spike/seshi.toml)
+exit 0
