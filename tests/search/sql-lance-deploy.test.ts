@@ -363,8 +363,9 @@ describe.each(VARIANTS)("sql on a LanceDB index served from $name", (variant) =>
       expect(sqlStatus(api)).toMatchObject({
         engine: "duckdb",
         ...(variant.storage ? { credential: "read-only" } : {}),
-        workers: { workers: 1, restarts: 0 },
       });
+      // The api process's own workers, as its GET /v1/admin/jobs reports them.
+      expect((await api.status()).sql).toMatchObject({ workers: 1, restarts: 0 });
     },
     120_000,
   );

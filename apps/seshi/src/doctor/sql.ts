@@ -11,6 +11,7 @@ import {
 } from "@seshi/search";
 import { sqlBackend } from "@seshi/search/backends";
 import { AccessDenied, openStore, type Store } from "@seshi/store";
+import { poolLine, type ServerPool, serverPoolText } from "./pool";
 import type { CheckResult } from "./types";
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err));
@@ -36,6 +37,8 @@ export interface SqlCheckOptions {
   /** Where the read-only credential's write probe goes: the index's location, reached with
    * `[search.sql.storage]` alone, by default. */
   probeStore?: () => Store;
+  /** A running server's workers (`--server`), read from its `GET /v1/admin/jobs`. */
+  server?: () => Promise<ServerPool>;
 }
 
 class TimedOut extends Error {}
@@ -50,11 +53,6 @@ function within<T>(promise: Promise<T>, ms: number): Promise<T> {
   ]).finally(() => clearTimeout(timer));
 }
 
-/** The pool's numbers as a line: `2 started, 0 busy, 0 queued, 0 restarted`. */
-export function poolLine(pool: SqlPoolStatus): string {
-  return `${pool.workers} started, ${pool.busy} busy, ${pool.queued} queued, ${pool.restarts} restarted`;
-}
-
 /** What `seshi search --status` says of sql. */
 export interface SqlStatus {
   /** What answers it here: SQLite, DuckDB, or nothing (a LanceDB index in a build without
@@ -63,27 +61,40 @@ export interface SqlStatus {
   /** A LanceDB index in a bucket: whether the workers hold `[search.sql.storage]` or the
    * index's own credential, which can write. */
   credential?: "read-only" | "index";
-  /** This process's workers, once a statement started them. Each server process starts its
-   * own with its first statement. */
-  workers: SqlPoolStatus | null;
+  /** The server asked for its workers (`--server`). Each server process starts its own with
+   * its first statement, so a process like this one, which answers none, has none. */
+  server?: string;
+  /** That server's workers: null before its first statement. */
+  workers?: SqlPoolStatus | null;
+  /** Why the server's workers could not be read. */
+  workers_error?: string;
 }
 
-export function sqlStatus(instance: Instance): SqlStatus | undefined {
+/** `server`: what a running server said of its workers, when `--server` named one. */
+export function sqlStatus(instance: Instance, server?: ServerPool): SqlStatus | undefined {
   if (!instance.sql || !instance.search) return undefined;
   const config = instance.config;
-  const workers = instance.sql.status() ?? null;
-  if (config.search.backend !== "lance") return { engine: "sqlite", workers };
-  if (sqlBackend() === undefined) return { engine: "unavailable", workers };
+  const asked = server
+    ? {
+        server: server.server,
+        ...(server.workers !== undefined ? { workers: server.workers } : {}),
+        ...(server.error !== undefined ? { workers_error: server.error } : {}),
+      }
+    : {};
+  if (config.search.backend !== "lance") return { engine: "sqlite", ...asked };
+  if (sqlBackend() === undefined) return { engine: "unavailable", ...asked };
   const url = config.search.lance.uri ?? config.store.url;
   const folder = url.startsWith("/") || url.startsWith("file:");
   return {
     engine: "duckdb",
     ...(folder ? {} : { credential: config.search.sql.storage ? "read-only" : "index" }),
-    workers,
+    ...asked,
   };
 }
 
-export function sqlStatusLines(sql: SqlStatus): string[] {
+/** `where`: a server config, whose workers a running server holds (`--server` reads them), or
+ * a serverless laptop, where each process that answers sql starts its own. */
+export function sqlStatusLines(sql: SqlStatus, where: "server" | "laptop" = "server"): string[] {
   const engine =
     sql.engine === "sqlite"
       ? "sql: SQLite, in worker processes"
@@ -97,11 +108,18 @@ export function sqlStatusLines(sql: SqlStatus): string[] {
                 : ""
           }`;
   if (sql.engine === "unavailable") return [engine];
+  if (sql.server !== undefined) {
+    return [
+      engine,
+      sql.workers_error !== undefined
+        ? `sql workers on ${sql.server}: could not ask: ${sql.workers_error}`
+        : `sql workers on ${sql.server}: ${serverPoolText(sql.workers ?? null)}`,
+    ];
+  }
+  if (where === "laptop") return [engine];
   return [
     engine,
-    sql.workers
-      ? `sql workers: ${poolLine(sql.workers)}`
-      : "sql workers: none in this process (each server starts its own with its first statement; seshi doctor --config runs one)",
+    "sql workers: a running server holds them: add --server <url> to ask it (seshi workers status --server <url> shows them too)",
   ];
 }
 
@@ -173,14 +191,35 @@ export async function sqlServerChecks(
       title: "SQL workers",
       status: pool.restarts > 0 ? "warn" : "ok",
       summary: `this check's: ${poolLine(pool)}`,
-      ...(pool.restarts > 0
-        ? {
-            hint: "a worker exited or was killed while answering one statement: see the warnings above, and [search.sql] worker_memory",
-          }
-        : {}),
+      ...(pool.restarts > 0 ? { hint: RESTART_HINT } : {}),
     });
   }
+  if (options.server) checks.push(serverPoolCheck(await options.server()));
   return checks;
+}
+
+const RESTART_HINT =
+  "a worker exited or was killed while answering one statement: see the warnings above, and [search.sql] worker_memory";
+
+/** The running server's workers, as `--server` read them. */
+export function serverPoolCheck(asked: ServerPool): CheckResult {
+  const base = { id: "sql-server-workers", title: "Server's SQL workers" } as const;
+  if (asked.error !== undefined) {
+    return {
+      ...base,
+      status: "warn",
+      summary: `could not ask ${asked.server}: ${asked.error}`,
+      hint: "GET /v1/admin/jobs takes an admin's credential: seshi login --server <url> as an admin",
+    };
+  }
+  const pool = asked.workers ?? null;
+  const restarted = pool !== null && pool.restarts > 0;
+  return {
+    ...base,
+    status: restarted ? "warn" : "ok",
+    summary: `${asked.server}: ${serverPoolText(pool)}`,
+    ...(restarted ? { hint: RESTART_HINT } : {}),
+  };
 }
 
 function probeFailure(err: unknown, lance: boolean, pool: SqlPoolStatus | undefined): CheckResult {

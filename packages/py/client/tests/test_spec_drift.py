@@ -68,6 +68,7 @@ MODELS: dict[str, type[BaseModel]] = {
     "SearchResults": m.SearchResults,
     "SearchResult": m.SearchResult,
     "SqlRequest": m.SqlRequest,
+    "SqlPoolStatus": m.SqlPoolStatus,
     "SqlResult": m.SqlResult,
     "SqlSchema": m.SqlSchema,
     "SqlScope": m.SqlScope,

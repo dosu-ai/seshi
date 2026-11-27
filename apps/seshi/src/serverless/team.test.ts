@@ -64,6 +64,8 @@ interface KeyPolicy {
 /** The bucket as one key sees it: the folder store, refusing what the key may not do with
  * `AccessDenied`, as S3 answers 403. */
 class LimitedStore implements Store {
+  /** Every prefix listed, in order. */
+  readonly listed: string[] = [];
   constructor(
     readonly inner: FsStore,
     readonly policy: KeyPolicy,
@@ -83,6 +85,7 @@ class LimitedStore implements Store {
     return this.inner.stat(key);
   }
   async list(prefix: string, options?: ListOptions) {
+    this.listed.push(prefix);
     if (!this.may("read", prefix) && !this.policy.read.some((p) => p.startsWith(prefix))) {
       throw new AccessDenied("list", prefix);
     }
@@ -123,7 +126,8 @@ async function laptop(
     includePrivate?: boolean;
     scope?: "mine" | "visible" | "all";
   } = {},
-): Promise<{ bucket: ServerlessBucket; backend: ServerlessBackend }> {
+): Promise<{ bucket: ServerlessBucket; backend: ServerlessBackend; store: LimitedStore }> {
+  const store = new LimitedStore(shared, policy);
   const bucket = await openServerless({
     cli: cliConfigSchema.parse({
       serverless: {
@@ -139,10 +143,14 @@ async function laptop(
     secrets: options.secrets ?? new MemorySecrets(),
     write: options.write ?? true,
     refreshShared: true,
-    store: new LimitedStore(shared, policy),
+    store,
   });
   opened.push(bucket);
-  return { bucket, backend: new ServerlessBackend(bucket, options.includePrivate ?? false) };
+  return {
+    bucket,
+    backend: new ServerlessBackend(bucket, options.includePrivate ?? false),
+    store,
+  };
 }
 
 async function sharedConfig(text: string): Promise<void> {
@@ -275,6 +283,35 @@ describe("two laptops on one bucket (F11.4, F11.5)", () => {
     const narrow = await laptop("bob", ownOnly("bob"), { scope: "mine" });
     const after = await narrow.backend.search({ q: "auth flow" });
     expect(after.results.map((r) => `${r.owner}/${r.session_id}`)).toEqual(["bob/b1"]);
+  });
+
+  it("answers a session uploaded a moment after it caught up, listing only its own feed when nothing is new", async () => {
+    const alice = await laptop("alice", member("alice"));
+    const bob = await laptop("bob", member("bob"));
+    await bob.bucket.instance.localSessions("bob", "claimed").ingest(upload("b1"));
+    const sessions = alice.bucket.instance.localSessions("alice", "claimed");
+    await sessions.ingest(upload("a1"));
+    const ids = async () =>
+      (await alice.backend.search({ q: "auth flow" })).results
+        .map((r) => `${r.owner}/${r.session_id}`)
+        .sort();
+    expect(await ids()).toEqual(["alice/a1", "bob/b1"]);
+
+    // Nothing new: well within two indexer intervals, one listing of alice's own feed.
+    alice.store.listed.length = 0;
+    expect(await ids()).toEqual(["alice/a1", "bob/b1"]);
+    expect(alice.store.listed).toEqual(["owners/alice/changes/"]);
+
+    // Uploaded seconds after the last catch-up: search and sql see it on the next call.
+    await sessions.ingest(upload("a2"));
+    expect(await ids()).toEqual(["alice/a1", "alice/a2", "bob/b1"]);
+    await sessions.ingest(upload("a3"));
+    const sql = "SELECT session_id FROM sessions WHERE owner = 'alice' ORDER BY 1";
+    expect((await alice.backend.sql({ sql, since: "400d" })).rows).toEqual([
+      ["a1"],
+      ["a2"],
+      ["a3"],
+    ]);
   });
 
   it("refuses to write with a key that cannot write its own folder", async () => {

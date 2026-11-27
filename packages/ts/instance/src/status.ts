@@ -1,4 +1,5 @@
 import { UPLOAD_SOURCE, VERSION } from "@seshi/model";
+import type { SqlPoolStatus } from "@seshi/search";
 import type { SourceStatus } from "@seshi/sources";
 import {
   countRecords,
@@ -47,6 +48,10 @@ export interface InstanceStatus {
   worker: WorkerView;
   jobs: JobStatus[];
   sources: SourceStatus[];
+  /** The sql workers of the process that answered, when it answers `sql` (the api role, with
+   * search on): null until its first statement starts them. Each api process keeps its own
+   * pool, so behind a load balancer this is the one that took the request. */
+  sql?: SqlPoolStatus | null;
   warnings: string[];
 }
 
@@ -187,6 +192,7 @@ export async function instanceStatus(instance: Instance): Promise<InstanceStatus
     worker,
     jobs,
     sources,
+    ...(instance.sql && instance.api ? { sql: instance.sql.status() ?? null } : {}),
     warnings,
   };
 }

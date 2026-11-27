@@ -67,9 +67,14 @@ beforeEach(async () => {
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 async function seshi(argv: string[], options: { stdin?: string } = {}) {
+  return cli(["sql", ...argv], options);
+}
+
+/** Any seshi command, as this machine's user. */
+async function cli(argv: string[], options: { stdin?: string } = {}) {
   const out: string[] = [];
   const err: string[] = [];
-  const code = await main(["sql", ...argv], {
+  const code = await main(argv, {
     env: { HOME: home },
     stdout: (l) => out.push(l),
     stderr: (l) => err.push(l),
@@ -213,6 +218,59 @@ describe("seshi sql, against a server", () => {
     const gone = await seshi([COUNT, "--server", "http://127.0.0.1:1", "--token", admin]);
     expect(gone.code).toBe(EXIT.unavailable);
   });
+  it("reports the server's sql workers: in its job status, seshi search --status and seshi doctor", async () => {
+    const login = await cli(["login", "--server", url, "--token", "-"], { stdin: admin });
+    expect(login.code, login.err).toBe(EXIT.ok);
+    const jobs = async () =>
+      JSON.parse((await cli(["workers", "status", "--server", url, "--json"])).out);
+    // Before its first statement the server has started none.
+    expect((await jobs()).sql).toBeNull();
+    expect((await cli(["workers", "status", "--server", url])).out).toContain(
+      `sql workers (${instance.process}): none started yet`,
+    );
+
+    await instance.search?.catchUp();
+    expect((await seshi([COUNT, "--server", url])).code).toBe(EXIT.ok);
+    const pool = { workers: 2, busy: 0, queued: 0, restarts: 0 };
+    expect((await jobs()).sql).toEqual(pool);
+    expect((await cli(["workers", "status", "--server", url])).out).toContain(
+      `sql workers (${instance.process}): 2 started, 0 busy, 0 queued, 0 restarted`,
+    );
+
+    // On the server's host, --server asks the running server rather than this process.
+    const status = await cli(["search", "--status", "--config", toml, "--server", url, "--json"]);
+    expect(status.code, status.err).toBe(EXIT.ok);
+    expect(JSON.parse(status.out).sql).toEqual({ engine: "sqlite", server: url, workers: pool });
+    const text = await cli(["search", "--status", "--config", toml, "--server", url]);
+    expect(text.out).toContain(`sql workers on ${url}: 2 started, 0 busy, 0 queued, 0 restarted`);
+    const doctor = await cli(["doctor", "--config", toml, "--server", url, "--json"]);
+    expect(doctor.code, doctor.err).toBe(EXIT.ok);
+    expect(JSON.parse(doctor.out).server).toContainEqual(
+      expect.objectContaining({
+        id: "sql-server-workers",
+        status: "ok",
+        summary: `${url}: 2 started, 0 busy, 0 queued, 0 restarted`,
+      }),
+    );
+
+    // A member's token may not read job status: said, not failed.
+    const member = await cli([
+      "search",
+      "--status",
+      "--config",
+      toml,
+      "--server",
+      url,
+      "--token",
+      TOKEN,
+      "--json",
+    ]);
+    expect(member.code, member.err).toBe(EXIT.ok);
+    expect(JSON.parse(member.out).sql).toMatchObject({
+      server: url,
+      workers_error: expect.any(String),
+    });
+  }, 60_000);
 });
 
 describe("the command's pieces", () => {

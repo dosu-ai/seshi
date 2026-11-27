@@ -236,6 +236,33 @@ describe("the indexer (F10.2)", () => {
     expect((await index.state()).ready_at).toBe(clock.toISOString());
   });
 
+  it("says an owner's feed is behind when it holds an entry the index has not read", async () => {
+    await db("alice").ingest({ format: "trajectory", session_id: "s1", transcript: log("one") });
+    await db("bob").ingest({ format: "trajectory", session_id: "s2", transcript: log("two") });
+    const { indexer } = setup();
+    expect(await indexer.behind("alice")).toBe(true);
+    await indexer.catchUp();
+    // Its entries are inside the lag window, so listed again, but read: not behind.
+    expect(await indexer.behind("alice")).toBe(false);
+    expect(await indexer.behind("bob")).toBe(false);
+    await db("alice").ingest({ format: "trajectory", session_id: "s3", transcript: log("three") });
+    expect(await indexer.behind("alice")).toBe(true);
+    expect(await indexer.behind("bob")).toBe(false);
+    await indexer.catchUp();
+    expect(await indexer.behind("alice")).toBe(false);
+    // An owner never read, with nothing written, is not behind.
+    expect(await indexer.behind("carol")).toBe(false);
+  });
+
+  it("finds an unread entry past a full page of read ones", async () => {
+    await continued(3);
+    const { indexer } = gathering(0);
+    await indexer.catchUp();
+    expect(await indexer.behind("alice")).toBe(false);
+    await db().ingest({ format: "trajectory", session_id: "s9", transcript: log("late") });
+    expect(await indexer.behind("alice")).toBe(true);
+  });
+
   it("indexes where a session ran and with what: its repo, harness, version and models", async () => {
     await db().ingest({
       format: "trajectory",

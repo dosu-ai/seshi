@@ -470,6 +470,11 @@ export class SearchService {
     return (await this.open()).indexer.catchUp(signal);
   }
 
+  /** Whether `owner`'s change feed holds an entry this index has not read (one listing). */
+  async behind(owner: string): Promise<boolean> {
+    return (await this.open()).indexer.behind(owner);
+  }
+
   /** Drop everything the index holds and build it again from the change feed (F10.2). Until
    * it has caught up, queries here and in any process sharing the file are refused. Not for a
    * shared index: see `startRebuild()`. */

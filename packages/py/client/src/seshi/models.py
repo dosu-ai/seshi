@@ -1357,6 +1357,16 @@ class InstanceInfo(Response):
     version: str
 
 
+class SqlPoolStatus(Response):
+    """A server process's sql workers."""
+
+    workers: int
+    busy: int
+    queued: int
+    restarts: int
+    """Workers killed by the watchdog or that exited, since the pool started."""
+
+
 class JobsStatus(Response):
     """`GET /v1/admin/jobs`: the worker, its jobs and every source."""
 
@@ -1367,6 +1377,9 @@ class JobsStatus(Response):
     jobs: list[JobStatus]
     sources: list[SourceStatus]
     warnings: list[str]
+    sql: SqlPoolStatus | None = None
+    """The answering process's sql workers: None before its first statement, or when it does
+    not answer sql."""
 
 
 class ReloadSources(Response):
