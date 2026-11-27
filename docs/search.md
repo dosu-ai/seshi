@@ -304,7 +304,10 @@ worker of its own, which loads DuckDB and its `lance` extension and reads the in
 workers' credential, then tries to write a small file where the index lives with
 `[search.sql.storage]` alone. It fails when the extension does not load, the workers cannot
 read, or that credential can write; it warns when there is none. `seshi search --status`
-says which engine answers `sql` and which credential its workers hold.
+says which engine answers `sql` and which credential its workers hold. Each api process starts
+its own workers with its first statement, so these commands, run beside it, have none: add
+`--server <url>` (an admin's login) to either, or run `seshi workers status --server <url>`,
+for the running server's (`GET /v1/admin/jobs`'s `sql`: started, busy, queued and restarted).
 
 **Scope on LanceDB.** `events` and `llm_calls` hold the rows of the sessions `sessions` admits,
 and `events` also checks each row's own visibility, so a session turned owner-only leaves a

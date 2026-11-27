@@ -62,6 +62,7 @@ export type {
   SourceDetail,
   SourceRecord,
   SourceStatus,
+  SqlPoolStatus,
   TokenInfo,
   TokenKind,
   TokenRequest,

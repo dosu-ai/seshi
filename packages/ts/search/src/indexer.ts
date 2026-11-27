@@ -33,6 +33,9 @@ export const FEED_LAG_MS = 5 * 60 * 1000;
 export const FEED_PAGE = 500;
 export const RUN_BUDGET = 5000;
 export const OWNER_REFRESH_MS = 60 * 1000;
+/** How long before the last catch-up an unread entry still counts as new for `behind()`: an
+ * entry stamped just before a pass listed its feed, whose write landed after. */
+export const BEHIND_SKEW_MS = 2_000;
 const CONCURRENCY = 8;
 
 const HEX64 = /^[0-9a-f]{64}$/;
@@ -363,6 +366,34 @@ export class Indexer {
       total.removed += run.removed;
       total.caught_up = run.caught_up;
       if (!run.more || signal.aborted) return total;
+    }
+  }
+
+  /** Whether `owner`'s feed holds an entry written since the last catch-up that the index has
+   * not read: its feed listed from the cursor (less the lag window), as a pass would list it.
+   * A reader that caught up a moment ago asks this before answering, so a session uploaded
+   * since is not missing for the indexer interval; it costs one listing, where a pass lists
+   * every owner's feed. An unread entry stamped before that catch-up (`caughtUp`, the index's
+   * `caught_up_at`, less `BEHIND_SKEW_MS`) is one the pass held back inside the lag window, as
+   * it does an upload deleted since: it does not count, or every call would catch up again
+   * until the lag passed. */
+  async behind(owner: string, caughtUp: string | undefined): Promise<boolean> {
+    const generation = await this.index.generation();
+    const since = caughtUp === undefined ? -Infinity : Date.parse(caughtUp) - BEHIND_SKEW_MS;
+    const prefix = keys.changes(owner);
+    const held = (await this.index.cursors(generation, [owner])).get(owner);
+    let startAfter = held === undefined ? undefined : this.windowStart(prefix, held);
+    for (;;) {
+      const page = await this.store.list(prefix, { startAfter, limit: this.pageSize });
+      const listed = page.keys.filter((k) => {
+        const at = parseChangeKey(k.slice(prefix.length))?.at;
+        return at !== undefined && at > since;
+      });
+      const seen = await this.index.seen(generation, owner, listed);
+      if (listed.some((k) => !seen.has(k))) return true;
+      const last = page.keys.at(-1);
+      if (!page.truncated || last === undefined) return false;
+      startAfter = last;
     }
   }
 

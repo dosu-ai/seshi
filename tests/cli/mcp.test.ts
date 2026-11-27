@@ -17,7 +17,7 @@ import { BUILTIN_FORMATS, FormatRegistry } from "@seshi/formats";
 import { buildInstance } from "@seshi/instance";
 import { lanceIndex } from "@seshi/lance";
 import { StoreSeshi } from "@seshi/pipeline";
-import { provideLance } from "@seshi/search";
+import { OWNER_REFRESH_MS, provideLance } from "@seshi/search";
 import { lanceExtensions } from "@seshi/sql/testing";
 import { FsStore } from "@seshi/store";
 import { buildFormats } from "seshi/integrations";
@@ -185,13 +185,19 @@ describe.each(VARIANTS)("seshi mcp against seshi serve, $name", (variant) => {
       transcript: log("write the docs", "FAIL docs build broke", recent(10)),
       repo: "github.com/acme/docs",
     });
-    await until(async () => {
-      const list = await new HttpSeshi({ server: url, token: adminToken }).searchSessions();
-      if (list.sessions.length !== 3) {
-        throw new Error(`listed ${list.sessions.map((x) => x.session_id).join(", ")}`);
-      }
-      return list;
-    }, "the index to hold the sessions").catch((err) => {
+    // A worker pass between alice's uploads and bob's leaves bob's folder unread until it lists
+    // owners again, OWNER_REFRESH_MS later.
+    await until(
+      async () => {
+        const list = await new HttpSeshi({ server: url, token: adminToken }).searchSessions();
+        if (list.sessions.length !== 3) {
+          throw new Error(`listed ${list.sessions.map((x) => x.session_id).join(", ")}`);
+        }
+        return list;
+      },
+      "the index to hold the sessions",
+      OWNER_REFRESH_MS + 60_000,
+    ).catch((err) => {
       throw new Error(`${(err as Error).message}\nserver:\n${serverLog}`);
     });
   }, 240_000);

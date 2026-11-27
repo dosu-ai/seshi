@@ -29,8 +29,10 @@ import { failWith } from "../cli/failures";
 import { emit, fail, helpOrUsageError, takeJson } from "../cli/output";
 import { printable, Style, styleFor } from "../cli/style";
 import { NotConnected } from "../connect";
+import type { ServerPool } from "../doctor/pool";
 import { isServerless } from "../serverless/settings";
 import { USER_AGENT } from "../user-agent";
+import { adminTarget } from "./admin-target";
 import type { CommandContext } from "./index";
 import { cwdConfigHint, openServer, serverFailure } from "./server-instance";
 
@@ -43,6 +45,7 @@ const USAGE = [
   "                    [--server <url>] [--token <t> [--user <name>]] [--config <file>] [--set path=value]… [--json]",
   "                    [--include-private]   serverless mode: owner-only sessions too",
   "       seshi search --status | --rebuild [--wait] | --scrub [--config <file>] [--set path=value]… [--json]",
+  "       seshi search --status --server <url> [--token <t>] [--config <file>]…   with that server's sql workers",
 ].join("\n");
 
 const OPTIONS = {
@@ -356,6 +359,10 @@ function serverConfigHere(ctx: CommandContext): boolean {
   );
 }
 
+/** Where `--status` finds the sql workers: on a laptop, each process that answers sql starts
+ * its own; on a server's host, the running server holds them, read with `--server`. */
+type Workers = "laptop" | (() => Promise<ServerPool>) | undefined;
+
 async function inProcess(
   ctx: CommandContext,
   json: boolean,
@@ -364,6 +371,7 @@ async function inProcess(
   request: SearchRequest | undefined,
   style: Style,
   wait = false,
+  workers: Workers = undefined,
 ): Promise<number> {
   const search = instance.search;
   if (!search) {
@@ -390,10 +398,11 @@ async function inProcess(
   if (mode === "status") {
     const status = await search.status();
     const { sqlStatus, sqlStatusLines } = await import("../doctor/sql");
-    const sql = sqlStatus(instance);
+    const asked = typeof workers === "function" ? await workers() : undefined;
+    const sql = sqlStatus(instance, asked);
     emit(ctx, json, { ...status, ...(sql ? { sql } : {}) }, () => [
       ...statusLines(status),
-      ...(sql ? sqlStatusLines(sql) : []),
+      ...(sql ? sqlStatusLines(sql, workers === "laptop" ? "laptop" : "server") : []),
     ]);
     return EXIT.ok;
   }
@@ -515,11 +524,16 @@ export async function run(ctx: CommandContext): Promise<number> {
     const style = await styleFor(ctx, { json, theme: cli.theme });
     const server = values.server ?? cli.server;
     if (server !== undefined && (values.server !== undefined || !isServerless(cli))) {
+      if (mode === "status" && values.server !== undefined && serverConfigHere(ctx)) {
+        return await withServer(ctx, json, values, mode, request, style);
+      }
       if (mode !== "query") {
         return helpOrUsageError(
           ctx,
           json,
-          `--${mode} works on a local index; run it where the index is (with --config)`,
+          `--${mode} works on a local index; run it where the index is (with --config${
+            mode === "status" ? ", and --server <url> for that server's sql workers" : ""
+          })`,
           USAGE,
         );
       }
@@ -555,6 +569,7 @@ export async function run(ctx: CommandContext): Promise<number> {
         request,
         style,
         values.wait === true,
+        "laptop",
       );
     }
     if (serverConfigHere(ctx)) {
@@ -596,10 +611,43 @@ async function withServer(
     },
   );
   try {
-    return await inProcess(ctx, json, instance, mode, request, style, values.wait === true);
+    return await inProcess(
+      ctx,
+      json,
+      instance,
+      mode,
+      request,
+      style,
+      values.wait === true,
+      serverWorkers(ctx, values),
+    );
   } finally {
     await instance.close();
   }
+}
+
+/** `--status --server <url>`: that server's sql workers, from its `GET /v1/admin/jobs`, with
+ * `--token` or the stored login for it. */
+function serverWorkers(ctx: CommandContext, values: Values): Workers {
+  const named = values.server;
+  if (named === undefined) return undefined;
+  return async () => {
+    const { serverPool } = await import("../doctor/pool");
+    const server = normalizeServer(named);
+    return serverPool(server, async () => {
+      if (values.token !== undefined) {
+        return new HttpSeshi({
+          server,
+          token: values.token,
+          userAgent: USER_AGENT,
+          ...(values.user !== undefined ? { user: values.user } : {}),
+        }).jobs();
+      }
+      const target = await adminTarget(ctx, { server: named });
+      if (target.kind !== "remote") throw new Error(`${server} is not a server`);
+      return target.db.jobs();
+    });
+  };
 }
 
 function failure(ctx: CommandContext, json: boolean, err: unknown): number {

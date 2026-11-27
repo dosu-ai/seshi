@@ -1,6 +1,7 @@
 import { type CaptureState, readState, StateUnreadable } from "@seshi/capture";
 import { parseDuration } from "@seshi/config";
 import { type Account, openAccount } from "../account/account";
+import { BadServerUrl, normalizeServer } from "../account/logins";
 import { type Backend, openBackend, ServerlessBackend } from "../backend";
 import { allCaptureAgents } from "../capture-agents";
 import { EXIT, type ExitCode } from "../cli/exit";
@@ -18,6 +19,7 @@ import {
   type Target,
   worst,
 } from "../doctor/index";
+import { type ServerPool, serverPool } from "../doctor/pool";
 import { serverlessChecks } from "../doctor/serverless";
 import { resolveSession } from "./capture";
 import { hostOf, pathsOf } from "./capture-host";
@@ -25,7 +27,8 @@ import type { CommandContext } from "./index";
 
 const USAGE = `usage: seshi doctor [--session [<id>]] [--agent <agent>] [--since <duration>] [--deep]
                     [--server <url>] [--json]
-       seshi doctor --config <file> [--set path=value]… [--json]   a server's own checks`;
+       seshi doctor --config <file> [--set path=value]… [--server <url>] [--json]
+                    a server's own checks; --server asks that running server for its sql workers`;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -34,6 +37,7 @@ interface Args {
   agent?: string;
   since?: string;
   deep?: boolean;
+  /** The server to ask; with `--config`, the running server whose sql workers to report. */
   server?: string;
   /** A server config: check the server's side (its search index) instead of this machine. */
   config?: string;
@@ -77,11 +81,17 @@ export function parseDoctorArgs(argv: readonly string[]): Args | string {
     }
   }
   const server = args.config !== undefined || args.set !== undefined;
-  if (
-    server &&
-    (args.session !== undefined || args.agent || args.since || args.deep || args.server)
-  ) {
+  if (server && (args.session !== undefined || args.agent || args.since || args.deep)) {
     return "--config checks a server; its other options are for this machine's sessions";
+  }
+  if (server && args.server !== undefined) {
+    // Asked after the server's own checks have run: a URL that cannot be one is refused first.
+    try {
+      args.server = normalizeServer(args.server);
+    } catch (err) {
+      if (err instanceof BadServerUrl) return err.message;
+      throw err;
+    }
   }
   if (args.session !== undefined && args.since !== undefined) {
     return "--since is for checking every recent session; leave it out with --session";
@@ -349,6 +359,17 @@ export async function run(ctx: CommandContext): Promise<number> {
   }
 }
 
+/** A running server's sql workers, asked with the stored login for it. `server` is normalized
+ * (`parseDoctorArgs`). */
+async function askServer(ctx: CommandContext, server: string): Promise<ServerPool> {
+  const { adminTarget } = await import("./admin-target");
+  return serverPool(server, async () => {
+    const target = await adminTarget(ctx, { server });
+    if (target.kind !== "remote") throw new Error(`${server} is not a server`);
+    return target.db.jobs();
+  });
+}
+
 function exitCode(reports: SessionReport[], backendError: { exit?: number } | undefined): ExitCode {
   if (backendError?.exit !== undefined && reports.length > 0) return backendError.exit as ExitCode;
   const codes = new Set(reports.map((r) => r.evidence.server.metadata_error?.code));
@@ -360,7 +381,8 @@ function exitCode(reports: SessionReport[], backendError: { exit?: number } | un
 
 /** `seshi doctor --config`: the server's own checks, run where its config is (the search
  * index: reachable, writable by the worker, current, and its size; sql: a statement runs, the
- * workers' credential is read-only, and the workers that ran it). */
+ * workers' credential is read-only, and the workers that ran it). With `--server`, the running
+ * server's own sql workers too, from its `GET /v1/admin/jobs`. */
 async function serverDoctor(ctx: CommandContext, json: boolean, args: Args): Promise<number> {
   const { openServer, serverFailure } = await import("./server-instance");
   const { searchServerChecks } = await import("../doctor/search");
@@ -385,7 +407,12 @@ async function serverDoctor(ctx: CommandContext, json: boolean, args: Args): Pro
     const style = await styleFor(ctx, { json });
     const checks = [
       ...(await searchServerChecks(instance, loaded.config, { env: ctx.env })),
-      ...(await sqlServerChecks(instance, loaded.config, { env: ctx.env })),
+      ...(await sqlServerChecks(instance, loaded.config, {
+        env: ctx.env,
+        ...(args.server !== undefined
+          ? { server: () => askServer(ctx, args.server as string) }
+          : {}),
+      })),
     ];
     emit(ctx, json, { server: checks }, () => bucketLines(checks, style, "Server"));
     const status = worst(checks.map((c) => c.status));

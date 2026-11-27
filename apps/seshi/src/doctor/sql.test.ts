@@ -10,7 +10,7 @@ import { ensureLayout, FsStore } from "@seshi/store";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { INTEGRATIONS } from "../integrations";
 import { main } from "../main";
-import { sqlStatusLines } from "./sql";
+import { serverPoolCheck, sqlStatusLines } from "./sql";
 
 let dir: string;
 let home: string;
@@ -70,28 +70,86 @@ server("seshi doctor --config, sql", () => {
 });
 
 server("seshi search --status, sql", () => {
-  it("says what answers sql and that this process has no workers", async () => {
+  it("says what answers sql, and that a running server holds the workers", async () => {
     const status = await seshi(["search", "--status", "--config", toml, "--json"]);
     expect(status.code, status.err).toBe(0);
-    expect(JSON.parse(status.out).sql).toEqual({ engine: "sqlite", workers: null });
+    expect(JSON.parse(status.out).sql).toEqual({ engine: "sqlite" });
     const text = await seshi(["search", "--status", "--config", toml]);
     expect(text.out).toContain("sql: SQLite, in worker processes");
-    expect(text.out).toContain("sql workers: none in this process");
+    expect(text.out).toContain("sql workers: a running server holds them: add --server <url>");
+  });
+
+  it("says why it could not ask a server for its workers", async () => {
+    const status = await seshi([
+      "search",
+      "--status",
+      "--config",
+      toml,
+      "--server",
+      "http://127.0.0.1:1",
+      "--token",
+      "seshi-not-a-token-0123456789",
+      "--json",
+    ]);
+    expect(status.code, status.err).toBe(0);
+    expect(JSON.parse(status.out).sql).toMatchObject({
+      engine: "sqlite",
+      server: "http://127.0.0.1:1",
+      workers_error: expect.any(String),
+    });
   });
 });
 
 describe("sqlStatusLines", () => {
   it("names DuckDB's credential, or the build that carries it", () => {
-    const pool = { workers: 2, busy: 1, queued: 0, restarts: 3 };
-    expect(sqlStatusLines({ engine: "duckdb", credential: "read-only", workers: pool })).toEqual([
+    expect(sqlStatusLines({ engine: "duckdb", credential: "read-only" })).toEqual([
       "sql: DuckDB over the Lance tables, in worker processes holding [search.sql.storage] (read-only)",
-      "sql workers: 2 started, 1 busy, 0 queued, 3 restarted",
+      "sql workers: a running server holds them: add --server <url> to ask it (seshi workers status --server <url> shows them too)",
     ]);
-    expect(sqlStatusLines({ engine: "duckdb", credential: "index", workers: null })[0]).toContain(
+    expect(sqlStatusLines({ engine: "duckdb", credential: "index" })[0]).toContain(
       "the index's own credential, which can write",
     );
-    expect(sqlStatusLines({ engine: "unavailable", workers: null })).toEqual([
+    expect(sqlStatusLines({ engine: "unavailable" })).toEqual([
       "sql: not in this build, which answers 501 (the seshi-server-sql build and the -sql image carry DuckDB)",
     ]);
+  });
+
+  it("gives a server's workers, none before its first statement, or why it could not ask", () => {
+    const server = "https://seshi.example.com";
+    const pool = { workers: 2, busy: 1, queued: 0, restarts: 3 };
+    expect(sqlStatusLines({ engine: "sqlite", server, workers: pool })[1]).toBe(
+      "sql workers on https://seshi.example.com: 2 started, 1 busy, 0 queued, 3 restarted",
+    );
+    expect(sqlStatusLines({ engine: "sqlite", server, workers: null })[1]).toBe(
+      "sql workers on https://seshi.example.com: none started yet (a server starts them with its first statement)",
+    );
+    expect(sqlStatusLines({ engine: "sqlite", server, workers_error: "forbidden" })[1]).toBe(
+      "sql workers on https://seshi.example.com: could not ask: forbidden",
+    );
+    // A laptop's processes each start their own: nothing to point at.
+    expect(sqlStatusLines({ engine: "sqlite" }, "laptop")).toEqual([
+      "sql: SQLite, in worker processes",
+    ]);
+  });
+});
+
+describe("serverPoolCheck", () => {
+  const server = "https://seshi.example.com";
+  it("is ok with the server's workers, and warns on restarts or when it could not ask", () => {
+    expect(
+      serverPoolCheck({ server, workers: { workers: 2, busy: 0, queued: 0, restarts: 0 } }),
+    ).toMatchObject({
+      id: "sql-server-workers",
+      status: "ok",
+      summary: "https://seshi.example.com: 2 started, 0 busy, 0 queued, 0 restarted",
+    });
+    expect(serverPoolCheck({ server, workers: null })).toMatchObject({ status: "ok" });
+    expect(
+      serverPoolCheck({ server, workers: { workers: 2, busy: 0, queued: 0, restarts: 1 } }),
+    ).toMatchObject({ status: "warn", hint: expect.stringContaining("worker_memory") });
+    expect(serverPoolCheck({ server, error: "forbidden" })).toMatchObject({
+      status: "warn",
+      summary: "could not ask https://seshi.example.com: forbidden",
+    });
   });
 });
